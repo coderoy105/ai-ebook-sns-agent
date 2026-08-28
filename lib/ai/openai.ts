@@ -9,10 +9,37 @@ type OpenAIResponsePayload = {
   data?: Array<{ embedding?: number[] }>;
 };
 
-function apiKey() {
-  const key = process.env.OPENAI_API_KEY;
-  if (!key) throw new Error("OPENAI_API_KEY is missing.");
-  return key;
+type AiEndpoint = {
+  token: string;
+  baseUrl: string;
+  gateway: boolean;
+};
+
+function endpoint(): AiEndpoint {
+  const gatewayToken = process.env.AI_GATEWAY_API_KEY ?? process.env.VERCEL_OIDC_TOKEN;
+  if (gatewayToken) {
+    return {
+      token: gatewayToken,
+      baseUrl: "https://ai-gateway.vercel.sh/v1",
+      gateway: true
+    };
+  }
+
+  const openAiKey = process.env.OPENAI_API_KEY;
+  if (openAiKey) {
+    return {
+      token: openAiKey,
+      baseUrl: "https://api.openai.com/v1",
+      gateway: false
+    };
+  }
+
+  throw new Error("No AI provider credential is available. Configure Vercel OIDC/AI Gateway or OPENAI_API_KEY.");
+}
+
+function routedModel(model: string, gateway: boolean) {
+  if (!gateway || model.includes("/")) return model;
+  return `openai/${model}`;
 }
 
 function extractText(payload: OpenAIResponsePayload): string {
@@ -22,20 +49,22 @@ function extractText(payload: OpenAIResponsePayload): string {
     }
   }
   if (typeof payload.output_text === "string") return payload.output_text;
-  throw new Error("OpenAI response did not contain output text.");
+  throw new Error("AI response did not contain output text.");
 }
 
 export class OpenAIResponsesProvider implements LlmProvider {
   async generateStructured<T>(request: StructuredRequest<T>): Promise<StructuredResponse<T>> {
     const started = Date.now();
-    const response = await fetch("https://api.openai.com/v1/responses", {
+    const ai = endpoint();
+    const model = routedModel(request.model, ai.gateway);
+    const response = await fetch(`${ai.baseUrl}/responses`, {
       method: "POST",
       headers: {
-        "authorization": `Bearer ${apiKey()}`,
+        authorization: `Bearer ${ai.token}`,
         "content-type": "application/json"
       },
       body: JSON.stringify({
-        model: request.model,
+        model,
         input: [
           { role: "system", content: [{ type: "input_text", text: request.system }] },
           { role: "user", content: [{ type: "input_text", text: request.prompt }] }
@@ -55,7 +84,7 @@ export class OpenAIResponsesProvider implements LlmProvider {
 
     const raw = await response.json() as OpenAIResponsePayload;
     if (!response.ok) {
-      throw new Error(`OpenAI error ${response.status}: ${JSON.stringify(raw).slice(0, 1200)}`);
+      throw new Error(`AI provider error ${response.status}: ${JSON.stringify(raw).slice(0, 1200)}`);
     }
 
     const text = extractText(raw);
@@ -72,7 +101,7 @@ export class OpenAIResponsesProvider implements LlmProvider {
         inputTokens: raw.usage?.input_tokens ?? 0,
         outputTokens: raw.usage?.output_tokens ?? 0,
         durationMs: Date.now() - started,
-        model: request.model,
+        model,
         requestId: response.headers.get("x-request-id") ?? undefined
       },
       raw
@@ -80,21 +109,22 @@ export class OpenAIResponsesProvider implements LlmProvider {
   }
 
   async embed(input: string) {
-    const response = await fetch("https://api.openai.com/v1/embeddings", {
+    const ai = endpoint();
+    const configured = process.env.OPENAI_EMBEDDING_MODEL ?? "text-embedding-3-small";
+    const model = routedModel(configured, ai.gateway);
+    const response = await fetch(`${ai.baseUrl}/embeddings`, {
       method: "POST",
       headers: {
-        "authorization": `Bearer ${apiKey()}`,
+        authorization: `Bearer ${ai.token}`,
         "content-type": "application/json"
       },
-      body: JSON.stringify({
-        model: process.env.OPENAI_EMBEDDING_MODEL ?? "text-embedding-3-small",
-        input
-      })
+      body: JSON.stringify({ model, input })
     });
     const payload = await response.json() as OpenAIResponsePayload;
-    if (!response.ok) throw new Error(`Embedding error ${response.status}: ${JSON.stringify(payload).slice(0, 900)}`);
+    if (!response.ok) throw new Error(`Embedding provider error ${response.status}: ${JSON.stringify(payload).slice(0, 900)}`);
     const embedding = payload.data?.[0]?.embedding;
     if (!embedding) throw new Error("Embedding response did not contain a vector.");
+    if (embedding.length !== 1536) throw new Error(`Expected a 1536-dimensional embedding, received ${embedding.length}.`);
     return embedding;
   }
 }
