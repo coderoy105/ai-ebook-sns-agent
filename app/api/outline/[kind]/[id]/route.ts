@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireUser } from "@/lib/supabase/server";
 
 const UpdateSchema=z.object({title:z.string().min(1).max(500)});
 const tableByKind={part:"parts",chapter:"chapters",section:"sections"} as const;
 type Kind=keyof typeof tableByKind;
 
-async function owned(supabase:any,kind:Kind,id:string){
+async function owned(supabase:SupabaseClient,kind:Kind,id:string){
   const table=tableByKind[kind];
   const {data,error}=await supabase.from(table).select("id,book_id").eq("id",id).single();
   if(error||!data)return null;

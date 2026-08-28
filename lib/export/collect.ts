@@ -9,8 +9,15 @@ export async function collectBook(bookId:string):Promise<ExportBook>{
   const supabase=createServiceSupabase();
   const {data,error}=await supabase.from("books").select("id,title,subtitle,book_type,parts(id,title,position,chapters(id,title,position,sections(id,title,position,content_markdown)))").eq("id",bookId).single();
   if(error||!data)throw error??new Error("Book not found");
-  const parts=(data.parts as any[]??[]).sort((a,b)=>a.position-b.position).map(part=>({...part,chapters:(part.chapters??[]).sort((a:any,b:any)=>a.position-b.position).map((chapter:any)=>({...chapter,sections:(chapter.sections??[]).sort((a:any,b:any)=>a.position-b.position)}))}));
-  return {...data,parts} as ExportBook;
+  const rawParts=(data.parts??[]) as unknown as ExportPart[];
+  const parts=[...rawParts].sort((a,b)=>a.position-b.position).map(part=>({
+    ...part,
+    chapters:[...(part.chapters??[])].sort((a,b)=>a.position-b.position).map(chapter=>({
+      ...chapter,
+      sections:[...(chapter.sections??[])].sort((a,b)=>a.position-b.position)
+    }))
+  }));
+  return {id:data.id,title:data.title,subtitle:data.subtitle,book_type:data.book_type,parts};
 }
 
 export function stripMarkdown(markdown:string){

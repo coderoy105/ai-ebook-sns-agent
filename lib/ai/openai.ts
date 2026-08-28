@@ -1,12 +1,21 @@
 import type { LlmProvider, StructuredRequest, StructuredResponse } from "./provider";
 
+type OpenAIOutputContent = { type?: string; text?: unknown };
+type OpenAIOutputItem = { content?: OpenAIOutputContent[] };
+type OpenAIResponsePayload = {
+  output?: OpenAIOutputItem[];
+  output_text?: unknown;
+  usage?: { input_tokens?: number; output_tokens?: number };
+  data?: Array<{ embedding?: number[] }>;
+};
+
 function apiKey() {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("OPENAI_API_KEY is missing.");
   return key;
 }
 
-function extractText(payload: any): string {
+function extractText(payload: OpenAIResponsePayload): string {
   for (const item of payload.output ?? []) {
     for (const content of item.content ?? []) {
       if (content.type === "output_text" && typeof content.text === "string") return content.text;
@@ -44,7 +53,7 @@ export class OpenAIResponsesProvider implements LlmProvider {
       signal: request.signal
     });
 
-    const raw = await response.json();
+    const raw = await response.json() as OpenAIResponsePayload;
     if (!response.ok) {
       throw new Error(`OpenAI error ${response.status}: ${JSON.stringify(raw).slice(0, 1200)}`);
     }
@@ -82,9 +91,11 @@ export class OpenAIResponsesProvider implements LlmProvider {
         input
       })
     });
-    const payload = await response.json();
+    const payload = await response.json() as OpenAIResponsePayload;
     if (!response.ok) throw new Error(`Embedding error ${response.status}: ${JSON.stringify(payload).slice(0, 900)}`);
-    return payload.data?.[0]?.embedding as number[];
+    const embedding = payload.data?.[0]?.embedding;
+    if (!embedding) throw new Error("Embedding response did not contain a vector.");
+    return embedding;
   }
 }
 

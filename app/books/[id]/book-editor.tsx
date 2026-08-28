@@ -6,8 +6,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 type Section = { id:string; title:string; goal:string|null; position:number; status:string; target_words:number; word_count:number; content_markdown:string|null; summary:string|null; layout_hint:string|null };
 type Chapter = { id:string; title:string; goal:string|null; position:number; status:string; target_words:number; word_count:number; sections:Section[] };
 type Part = { id:string; title:string; purpose:string|null; position:number; chapters:Chapter[] };
-type Book = { id:string; title:string; subtitle:string|null; idea:string; book_type:string; status:string; progress:number; target_pages:number; target_words:number; quality_score:number|null; quality_scores:Record<string,number>; parts:Part[]; book_blueprints:any[]; book_covers:any[] };
+export type Book = { id:string; title:string; subtitle:string|null; idea:string; book_type:string; status:string; progress:number; target_pages:number; target_words:number; quality_score:number|null; quality_scores:Record<string,number>; parts:Part[]; book_blueprints:unknown[]; book_covers:unknown[] };
 type Revision = { id:string; revision_type:string; instruction:string|null; title_before:string|null; content_before:string|null; created_at:string };
+type GenerationLog = { id:string; created_at:string; message:string };
 
 function sortBook(book: Book) {
   return {
@@ -23,16 +24,14 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
   const firstSection = book.parts[0]?.chapters[0]?.sections[0] ?? null;
   const [selectedId,setSelectedId] = useState(firstSection?.id ?? "");
   const selected = useMemo(()=>book.parts.flatMap(p=>p.chapters).flatMap(c=>c.sections).find(s=>s.id===selectedId) ?? null,[book,selectedId]);
-  const [content,setContent] = useState(selected?.content_markdown ?? "");
+  const [content,setContent] = useState(firstSection?.content_markdown ?? "");
   const [saveState,setSaveState] = useState("saved");
   const [command,setCommand] = useState("");
   const [busy,setBusy] = useState(false);
-  const [logs,setLogs] = useState<any[]>([]);
+  const [logs,setLogs] = useState<GenerationLog[]>([]);
   const [status,setStatus] = useState({status:book.status,progress:Number(book.progress),quality_score:book.quality_score,quality_scores:book.quality_scores});
   const [history,setHistory] = useState<Revision[]>([]);
   const saveTimer = useRef<ReturnType<typeof setTimeout>|null>(null);
-
-  useEffect(()=>{ setContent(selected?.content_markdown ?? ""); },[selectedId]);
 
   const refreshStatus = useCallback(async()=>{
     const res=await fetch(`/api/books/${book.id}/status`,{cache:"no-store"});
@@ -43,11 +42,17 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
   },[book.id]);
 
   useEffect(()=>{
-    refreshStatus();
-    if(!["GENERATING","REVIEWING","PAUSED","PLANNING"].includes(status.status)) return;
-    const timer=setInterval(refreshStatus,5000);
-    return()=>clearInterval(timer);
+    const initialTimer=setTimeout(()=>{void refreshStatus();},0);
+    if(!["GENERATING","REVIEWING","PAUSED","PLANNING"].includes(status.status)) return()=>clearTimeout(initialTimer);
+    const timer=setInterval(()=>{void refreshStatus();},5000);
+    return()=>{clearTimeout(initialTimer);clearInterval(timer);};
   },[refreshStatus,status.status]);
+
+  function selectSection(section:Section) {
+    setSelectedId(section.id);
+    setContent(section.content_markdown ?? "");
+    setHistory([]);
+  }
 
   function patchLocalSection(id:string, patch:Partial<Section>) {
     setBook(prev=>({...prev,parts:prev.parts.map(part=>({...part,chapters:part.chapters.map(chapter=>({...chapter,sections:chapter.sections.map(section=>section.id===id?{...section,...patch}:section)}))}))}));
@@ -64,22 +69,22 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
   function changeContent(value:string) {
     setContent(value); setSaveState("dirty");
     if(saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current=setTimeout(()=>saveNow(value),1200);
+    saveTimer.current=setTimeout(()=>{void saveNow(value);},1200);
   }
 
-  async function startGeneration(){ setBusy(true); const r=await fetch(`/api/books/${book.id}/generate`,{method:"POST"}); setBusy(false); if(r.ok){setStatus(s=>({...s,status:"GENERATING"}));refreshStatus();}else alert((await r.json()).error??"Generation failed"); }
-  async function control(action:"pause"|"resume"|"cancel"){ const r=await fetch(`/api/books/${book.id}/control`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action})}); if(r.ok) refreshStatus(); }
+  async function startGeneration(){ setBusy(true); const r=await fetch(`/api/books/${book.id}/generate`,{method:"POST"}); setBusy(false); if(r.ok){setStatus(s=>({...s,status:"GENERATING"}));void refreshStatus();}else alert((await r.json()).error??"Generation failed"); }
+  async function control(action:"pause"|"resume"|"cancel"){ const r=await fetch(`/api/books/${book.id}/control`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action})}); if(r.ok) void refreshStatus(); }
 
   async function aiRewrite(){
     if(!selected||!command.trim())return; setBusy(true);
     const r=await fetch(`/api/sections/${selected.id}/rewrite`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({instruction:command})});
     const data=await r.json(); setBusy(false);
     if(!r.ok){alert(data.error??"Rewrite failed");return;}
-    setContent(data.markdown);patchLocalSection(selected.id,{content_markdown:data.markdown,summary:data.summary});setCommand("");loadHistory();
+    setContent(data.markdown);patchLocalSection(selected.id,{content_markdown:data.markdown,summary:data.summary});setCommand("");void loadHistory();
   }
 
   async function loadHistory(){ if(!selected)return; const r=await fetch(`/api/sections/${selected.id}/revisions`); if(r.ok)setHistory((await r.json()).revisions??[]); }
-  async function restoreRevision(id:string){ if(!confirm("이 버전으로 복원할까요? 현재 내용은 새 Revision으로 보존됩니다."))return; const r=await fetch(`/api/revisions/${id}/restore`,{method:"POST"}); if(r.ok){const d=await r.json();setContent(d.content);patchLocalSection(selectedId,{content_markdown:d.content});loadHistory();} }
+  async function restoreRevision(id:string){ if(!confirm("이 버전으로 복원할까요? 현재 내용은 새 Revision으로 보존됩니다."))return; const r=await fetch(`/api/revisions/${id}/restore`,{method:"POST"}); if(r.ok){const d=await r.json();setContent(d.content);patchLocalSection(selectedId,{content_markdown:d.content});void loadHistory();} }
 
   async function rename(kind:"part"|"chapter"|"section",id:string,current:string){ const title=prompt("새 제목",current)?.trim(); if(!title||title===current)return; const r=await fetch(`/api/outline/${kind}/${id}`,{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({title})}); if(r.ok) location.reload(); }
   async function remove(kind:"chapter"|"section",id:string){ if(!confirm("삭제하면 원고와 연결된 데이터도 함께 삭제됩니다. 계속할까요?"))return; const r=await fetch(`/api/outline/${kind}/${id}`,{method:"DELETE"}); if(r.ok)location.reload(); }
@@ -104,7 +109,7 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
           {part.chapters.map(chapter=><div key={chapter.id} className="outline-group">
             <div className="outline-row"><span className="chapter-label" onDoubleClick={()=>rename("chapter",chapter.id,chapter.title)}>{chapter.position+1}. {chapter.title}</span><button className="mini" onClick={()=>add("section",chapter.id)}>＋</button></div>
             {chapter.sections.map(section=><div key={section.id} className="outline-row" draggable onDragStart={(e)=>e.dataTransfer.setData("text/plain",section.id)} onDragOver={(e)=>e.preventDefault()} onDrop={(e)=>moveSection(chapter.id,e.dataTransfer.getData("text/plain"),section.id)}>
-              <button className={section.id===selectedId?"active":""} onClick={()=>setSelectedId(section.id)} onDoubleClick={()=>rename("section",section.id,section.title)}>{section.title}</button><button className="mini" onClick={()=>remove("section",section.id)}>×</button>
+              <button className={section.id===selectedId?"active":""} onClick={()=>selectSection(section)} onDoubleClick={()=>rename("section",section.id,section.title)}>{section.title}</button><button className="mini" onClick={()=>remove("section",section.id)}>×</button>
             </div>)}
             <button className="mini add-row" onClick={()=>add("chapter",part.id)}>＋ Chapter</button>
           </div>)}

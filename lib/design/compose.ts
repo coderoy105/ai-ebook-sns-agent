@@ -1,6 +1,17 @@
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { builtInTemplates, chooseLayout } from "./templates";
 
+type SectionRow = { id:string; title:string; position:number; content_markdown:string|null };
+type ChapterRow = { id:string; title:string; position:number; sections:SectionRow[] };
+type PartRow = { id:string; title:string; position:number; chapters:ChapterRow[] };
+type PageInsert = {
+  book_id:string;
+  page_number:number;
+  layout_type:string;
+  template_id:string;
+  content:Record<string, unknown>;
+};
+
 function splitIntoPageChunks(markdown: string, targetWords = 260) {
   const paragraphs = markdown.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
   const pages: string[] = [];
@@ -30,7 +41,8 @@ export async function composeBookPages(bookId: string) {
   const setting = Array.isArray(book.book_settings) ? book.book_settings[0] : book.book_settings;
   const templateId = setting?.template_id ?? "modern-editorial";
   const dna = builtInTemplates.find((t) => t.id === templateId) ?? builtInTemplates[0];
-  const rows: any[] = [];
+  const rows: PageInsert[] = [];
+  const parts = (book.parts ?? []) as unknown as PartRow[];
   let pageNumber = 1;
 
   rows.push({
@@ -40,20 +52,20 @@ export async function composeBookPages(bookId: string) {
   rows.push({
     book_id: bookId, page_number: pageNumber++, layout_type: "TableOfContents", template_id: dna.id,
     content: {
-      parts: (book.parts as any[]).sort((a,b) => a.position-b.position).map((part) => ({
+      parts: [...parts].sort((a,b) => a.position-b.position).map((part) => ({
         title: part.title,
-        chapters: part.chapters.sort((a:any,b:any) => a.position-b.position).map((chapter:any) => chapter.title)
+        chapters: [...part.chapters].sort((a,b) => a.position-b.position).map((chapter) => chapter.title)
       }))
     }
   });
 
-  for (const part of (book.parts as any[]).sort((a,b) => a.position-b.position)) {
-    for (const chapter of part.chapters.sort((a:any,b:any) => a.position-b.position)) {
+  for (const part of [...parts].sort((a,b) => a.position-b.position)) {
+    for (const chapter of [...part.chapters].sort((a,b) => a.position-b.position)) {
       rows.push({
         book_id: bookId, page_number: pageNumber++, layout_type: "ChapterOpening", template_id: dna.id,
         content: { partTitle: part.title, chapterTitle: chapter.title }
       });
-      for (const section of chapter.sections.sort((a:any,b:any) => a.position-b.position)) {
+      for (const section of [...chapter.sections].sort((a,b) => a.position-b.position)) {
         const chunks = splitIntoPageChunks(section.content_markdown ?? "", book.book_type.includes("소설") ? 310 : 250);
         for (const chunk of chunks) {
           rows.push({

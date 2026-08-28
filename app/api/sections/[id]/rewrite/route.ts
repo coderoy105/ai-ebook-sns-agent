@@ -10,6 +10,8 @@ const RewriteSchema = {
   properties: { markdown: { type: "string" }, summary: { type: "string" } }
 };
 
+type RewritePayload = { markdown?: unknown; summary?: unknown };
+
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
@@ -32,7 +34,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       jsonSchema: RewriteSchema,
       system: "You are the AI editor inside a professional book editor. Apply the user's instruction only to this section. Preserve established facts and do not imitate named authors.",
       prompt: `BOOK: ${section.book.title}\nCHAPTER: ${section.chapter.title}\nSECTION: ${section.title}\nINSTRUCTION: ${instruction}\n\nCURRENT MARKDOWN:\n${section.content_markdown ?? ""}`,
-      parse: (value: any) => ({ markdown: String(value.markdown ?? ""), summary: String(value.summary ?? "") })
+      parse: (value: unknown) => {
+        const parsed = value as RewritePayload;
+        return { markdown: String(parsed.markdown ?? ""), summary: String(parsed.summary ?? "") };
+      }
     });
 
     await supabase.from("sections").update({

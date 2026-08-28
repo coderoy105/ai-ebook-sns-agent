@@ -18,7 +18,7 @@ export async function POST(request:Request,{params}:{params:Promise<{id:string}>
 
 export async function PATCH(request:Request,{params}:{params:Promise<{id:string}>}){
   try{const {id:bookId}=await params;const {supabase}=await requireUser();const {data:book}=await supabase.from("books").select("id").eq("id",bookId).single();if(!book)return NextResponse.json({error:"Not found"},{status:404});const input=ReorderSchema.parse(await request.json());const table=input.kind==="chapter"?"chapters":"sections";
-    const {data:rows,error:readError}=await supabase.from(table).select("id,book_id").in("id",input.ids);if(readError)throw readError;if((rows??[]).length!==input.ids.length||(rows??[]).some((row:any)=>row.book_id!==bookId))return NextResponse.json({error:"Invalid outline selection"},{status:400});
+    const {data:rows,error:readError}=await supabase.from(table).select("id,book_id").in("id",input.ids);if(readError)throw readError;if((rows??[]).length!==input.ids.length||(rows??[]).some((row:{book_id:string})=>row.book_id!==bookId))return NextResponse.json({error:"Invalid outline selection"},{status:400});
     for(let i=0;i<input.ids.length;i++){const {error}=await supabase.from(table).update({position:i}).eq("id",input.ids[i]);if(error)throw error;}
     return NextResponse.json({ok:true});
   }catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Reorder failed"},{status:400});}

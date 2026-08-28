@@ -10,7 +10,7 @@ export async function renderBookEpub(book:ExportBook){
   zip.file("mimetype","application/epub+zip",{compression:"STORE"});
   zip.file("META-INF/container.xml",`<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`);
   const chapters=book.parts.flatMap(part=>part.chapters.map(ch=>({part,ch})));
-  const manifest=chapters.map(({ch},i)=>`<item id="c${i}" href="c${i}.xhtml" media-type="application/xhtml+xml"/>`).join("");
+  const manifest=chapters.map((_,i)=>`<item id="c${i}" href="c${i}.xhtml" media-type="application/xhtml+xml"/>`).join("");
   const spine=chapters.map((_,i)=>`<itemref idref="c${i}"/>`).join("");
   zip.file("OEBPS/content.opf",`<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="bookid">${book.id}</dc:identifier><dc:title>${esc(book.title)}</dc:title><dc:language>ko</dc:language><meta property="dcterms:modified">${new Date().toISOString().replace(/\.\d{3}Z$/,"Z")}</meta></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>${manifest}</manifest><spine>${spine}</spine></package>`);
   zip.file("OEBPS/nav.xhtml",`<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Contents</title></head><body><nav epub:type="toc" xmlns:epub="http://www.idpf.org/2007/ops"><h1>Contents</h1><ol>${chapters.map(({ch},i)=>`<li><a href="c${i}.xhtml">${esc(ch.title)}</a></li>`).join("")}</ol></nav></body></html>`);

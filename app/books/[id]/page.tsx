@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/supabase/server";
 import { BookEditor } from "./book-editor";
+import type { Book } from "./book-editor";
 
 export default async function BookPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -13,5 +14,5 @@ export default async function BookPage({ params }: { params: Promise<{ id: strin
     book_covers(concept)
   `).eq("id", id).single();
   if (error || !book) notFound();
-  return <BookEditor initialBook={book as any} />;
+  return <BookEditor initialBook={book as unknown as Book} />;
 }
