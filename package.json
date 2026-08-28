@@ -1,0 +1,35 @@
+{
+  "name": "ai-book-studio",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"tests/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@react-pdf/renderer": "^4.3.1",
+    "@supabase/ssr": "^0.7.0",
+    "@supabase/supabase-js": "^2.57.4",
+    "docx": "^9.5.1",
+    "jszip": "^3.10.1",
+    "next": "16.2.6",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "workflow": "4.2.5",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.3.1",
+    "@types/node": "^22.15.0",
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.4",
+    "eslint": "^9.25.1",
+    "eslint-config-next": "16.2.6",
+    "tsx": "^4.20.5",
+    "typescript": "^5.8.3"
+  }
+}
