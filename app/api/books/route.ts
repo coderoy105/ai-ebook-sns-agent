@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireUser } from "@/lib/supabase/server";
 import { computeWordBudget, getBookTypeRule } from "@/lib/book-types/engine";
 import { llm } from "@/lib/ai/openai";
+import { openRouterProviderFromRequest } from "@/lib/ai/openrouter-free";
 import { BookBlueprintSchema, ReaderProfileSchema, WritingStyleSchema } from "@/lib/ai/schemas";
 import { bookBlueprintJsonSchema } from "@/lib/ai/json-schemas";
 import { plannerPrompt, plannerSystem } from "@/lib/ai/prompts";
@@ -55,14 +56,16 @@ export async function POST(request: Request) {
     const targetWords = computeWordBudget(input.targetPages, input.bookType);
     const reader = inferReaderProfile(input);
     const style = inferWritingStyle(input);
-    const model = process.env.OPENAI_PLANNER_MODEL ?? "gpt-5";
+    const freeProvider = openRouterProviderFromRequest(request);
+    const provider = freeProvider ?? llm;
+    const model = freeProvider ? "openrouter/free" : (process.env.OPENAI_PLANNER_MODEL ?? "gpt-5");
 
-    const generation = await llm.generateStructured({
+    const generation = await provider.generateStructured({
       model,
       schemaName: "book_blueprint",
       jsonSchema: bookBlueprintJsonSchema as unknown as Record<string, unknown>,
       system: plannerSystem(),
-      prompt: plannerPrompt({ ...input, targetWords }),
+      prompt: `${plannerPrompt({ ...input, targetWords })}${freeProvider ? "\n\nFREE MODE: Prefer a practical outline that can be generated one section at a time. Combine redundant sections. Do not claim that web research or live citations were performed." : ""}`,
       parse: (value) => BookBlueprintSchema.parse(value)
     });
     const blueprint = generation.value;
@@ -98,9 +101,9 @@ export async function POST(request: Request) {
       supabase.from("book_blueprints").insert({ book_id: bookId, blueprint, version: 1, is_active: true }),
       supabase.from("book_settings").insert({
         book_id: bookId, target_pages: input.targetPages, target_words: targetWords, template_id: input.templateMood.toLowerCase().replace(/\s+/g, "-"), chapter_count: blueprint.parts.reduce((n,p) => n + p.chapters.length, 0),
-        creativity: 6, research_depth: rule.citationDefault === "research" ? 8 : rule.citationDefault === "standard" ? 5 : 2,
+        creativity: 6, research_depth: freeProvider ? 2 : (rule.citationDefault === "research" ? 8 : rule.citationDefault === "standard" ? 5 : 2),
         writing_density: 6, sentence_length: style.sentenceLength, vocabulary_level: style.technicalVocabulary,
-        examples_frequency: 6, citation_level: rule.citationDefault, image_frequency: 3, narrative_level: style.narrativeSpeed, technical_depth: style.technicalVocabulary
+        examples_frequency: 6, citation_level: freeProvider ? "none" : rule.citationDefault, image_frequency: 3, narrative_level: style.narrativeSpeed, technical_depth: style.technicalVocabulary
       })
     ]);
 
@@ -127,7 +130,7 @@ export async function POST(request: Request) {
 
         const sectionRows = chapterPlan.sections.map((section, sectionIndex) => ({
           book_id: bookId, chapter_id: chapter.id, position: sectionIndex, title: section.title, goal: section.goal,
-          target_words: section.targetWords, research_needed: section.researchNeeded, layout_hint: section.layoutHint, status: "PLANNED"
+          target_words: section.targetWords, research_needed: freeProvider ? false : section.researchNeeded, layout_hint: section.layoutHint, status: "PLANNED"
         }));
         const { error: sectionError } = await supabase.from("sections").insert(sectionRows);
         if (sectionError) throw sectionError;
@@ -138,16 +141,16 @@ export async function POST(request: Request) {
     if (blueprint.knowledgeMap) await supabase.from("knowledge_maps").insert({ book_id: bookId, data: blueprint.knowledgeMap, version: 1 });
 
     await supabase.from("token_usage").insert({
-      user_id: user.id, book_id: bookId, operation: "BOOK_PLANNER", model: generation.usage.model,
+      user_id: user.id, book_id: bookId, operation: freeProvider ? "FREE_BOOK_PLANNER" : "BOOK_PLANNER", model: generation.usage.model,
       input_tokens: generation.usage.inputTokens, output_tokens: generation.usage.outputTokens,
-      estimated_cost: estimateOpenAICost(generation.usage.model, generation.usage.inputTokens, generation.usage.outputTokens),
+      estimated_cost: freeProvider ? 0 : estimateOpenAICost(generation.usage.model, generation.usage.inputTokens, generation.usage.outputTokens),
       duration_ms: generation.usage.durationMs, retry_count: 0
     });
 
-    return NextResponse.json({ bookId, blueprint });
+    return NextResponse.json({ bookId, blueprint, aiMode: freeProvider ? "free" : "paid" });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
-    const status = message === "UNAUTHORIZED" ? 401 : message === "RATE_LIMITED" ? 429 : 400;
+    const status = message === "UNAUTHORIZED" ? 401 : message === "RATE_LIMITED" || message === "FREE_AI_DAILY_LIMIT" ? 429 : 400;
     return NextResponse.json({ error: message }, { status });
   }
 }
