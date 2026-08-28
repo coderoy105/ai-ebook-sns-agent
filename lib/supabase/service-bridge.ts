@@ -1,5 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import { getVercelOidcToken } from "@vercel/oidc";
+
 type BridgeError = { message: string; code?: string; details?: string; hint?: string };
 type BridgeResult<T = unknown> = { data: T; error: BridgeError | null; count?: number | null };
 type Filter = { op: "eq" | "neq" | "lt" | "lte" | "gt" | "gte" | "in" | "is"; column: string; value: unknown };
@@ -22,9 +24,13 @@ type QueryState = {
 
 async function bridgeRequest<T = unknown>(body: Record<string, unknown>): Promise<BridgeResult<T>> {
   const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const oidcToken = process.env.VERCEL_OIDC_TOKEN;
   if (!baseUrl) throw new Error("NEXT_PUBLIC_SUPABASE_URL is missing.");
-  if (!oidcToken) throw new Error("VERCEL_OIDC_TOKEN is missing. Use SUPABASE_SERVICE_ROLE_KEY only for local development.");
+
+  const oidcToken = process.env.VERCEL_OIDC_TOKEN ?? await getVercelOidcToken({
+    project: "ai-book-studio",
+    team: "koreassp105-1594s-projects"
+  });
+  if (!oidcToken) throw new Error("Vercel OIDC token is unavailable.");
 
   const response = await fetch(`${baseUrl}/functions/v1/ai-book-service`, {
     method: "POST",
