@@ -25,7 +25,10 @@ export async function createServerSupabase() {
   });
 }
 
-export function createServiceSupabase(): ReturnType<typeof createSupabaseClient> {
+// The production implementation is a small Supabase-compatible remote query builder.
+// A loose compatibility type is intentional so existing typed query chains keep their runtime shape.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function createServiceSupabase(): any {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (url && serviceRole) {
@@ -33,7 +36,7 @@ export function createServiceSupabase(): ReturnType<typeof createSupabaseClient>
       auth: { persistSession: false, autoRefreshToken: false }
     });
   }
-  return createRemoteServiceSupabase() as unknown as ReturnType<typeof createSupabaseClient>;
+  return createRemoteServiceSupabase();
 }
 
 export async function requireUser() {
