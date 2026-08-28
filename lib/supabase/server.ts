@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
+import { createRemoteServiceSupabase } from "@/lib/supabase/service-bridge";
 
 export async function createServerSupabase() {
   const cookieStore = await cookies();
@@ -17,20 +18,22 @@ export async function createServerSupabase() {
         try {
           cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options));
         } catch {
-          // Server Components cannot write cookies; middleware refreshes sessions.
+          // Server Components cannot write cookies; proxy refreshes sessions.
         }
       }
     }
   });
 }
 
-export function createServiceSupabase() {
+export function createServiceSupabase(): ReturnType<typeof createSupabaseClient> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !serviceRole) throw new Error("Server Supabase credentials are missing.");
-  return createSupabaseClient(url, serviceRole, {
-    auth: { persistSession: false, autoRefreshToken: false }
-  });
+  if (url && serviceRole) {
+    return createSupabaseClient(url, serviceRole, {
+      auth: { persistSession: false, autoRefreshToken: false }
+    });
+  }
+  return createRemoteServiceSupabase() as unknown as ReturnType<typeof createSupabaseClient>;
 }
 
 export async function requireUser() {
