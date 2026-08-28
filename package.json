@@ -30,6 +30,7 @@
     "@swc/core@1.15.3": true,
     "cbor-extract@2.2.2": true,
     "esbuild@0.28.2": true,
+    "fsevents@2.3.3": true,
     "unrs-resolver@1.12.2": true
   },
   "devDependencies": {
