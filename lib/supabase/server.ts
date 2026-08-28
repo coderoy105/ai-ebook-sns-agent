@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
-import { createRemoteServiceSupabase } from "@/lib/supabase/service-bridge";
+import { createRemoteServiceSupabase, type RemoteServiceSupabase } from "@/lib/supabase/service-bridge";
 
 export async function createServerSupabase() {
   const cookieStore = await cookies();
@@ -25,16 +25,13 @@ export async function createServerSupabase() {
   });
 }
 
-// The production implementation is a small Supabase-compatible remote query builder.
-// A loose compatibility type is intentional so existing typed query chains keep their runtime shape.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function createServiceSupabase(): any {
+export function createServiceSupabase(): RemoteServiceSupabase {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (url && serviceRole) {
     return createSupabaseClient(url, serviceRole, {
       auth: { persistSession: false, autoRefreshToken: false }
-    });
+    }) as unknown as RemoteServiceSupabase;
   }
   return createRemoteServiceSupabase();
 }
