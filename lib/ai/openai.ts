@@ -1,3 +1,4 @@
+import { getVercelOidcToken } from "@vercel/oidc";
 import type { LlmProvider, StructuredRequest, StructuredResponse } from "./provider";
 
 type OpenAIOutputContent = { type?: string; text?: unknown };
@@ -15,11 +16,23 @@ type AiEndpoint = {
   gateway: boolean;
 };
 
-function endpoint(): AiEndpoint {
-  const gatewayToken = process.env.AI_GATEWAY_API_KEY ?? process.env.VERCEL_OIDC_TOKEN;
-  if (gatewayToken) {
+async function endpoint(): Promise<AiEndpoint> {
+  const gatewayApiKey = process.env.AI_GATEWAY_API_KEY;
+  if (gatewayApiKey) {
     return {
-      token: gatewayToken,
+      token: gatewayApiKey,
+      baseUrl: "https://ai-gateway.vercel.sh/v1",
+      gateway: true
+    };
+  }
+
+  // On Vercel, OIDC is supplied through the request context rather than a
+  // normal process.env value. The helper handles both production request
+  // context and VERCEL_OIDC_TOKEN for local/CLI environments.
+  const oidcToken = await getVercelOidcToken();
+  if (oidcToken) {
+    return {
+      token: oidcToken,
       baseUrl: "https://ai-gateway.vercel.sh/v1",
       gateway: true
     };
@@ -34,7 +47,7 @@ function endpoint(): AiEndpoint {
     };
   }
 
-  throw new Error("No AI provider credential is available. Configure Vercel OIDC/AI Gateway or OPENAI_API_KEY.");
+  throw new Error("No AI provider credential is available. Configure Vercel AI Gateway OIDC/AI_GATEWAY_API_KEY or OPENAI_API_KEY.");
 }
 
 function routedModel(model: string, gateway: boolean) {
@@ -55,7 +68,7 @@ function extractText(payload: OpenAIResponsePayload): string {
 export class OpenAIResponsesProvider implements LlmProvider {
   async generateStructured<T>(request: StructuredRequest<T>): Promise<StructuredResponse<T>> {
     const started = Date.now();
-    const ai = endpoint();
+    const ai = await endpoint();
     const model = routedModel(request.model, ai.gateway);
     const response = await fetch(`${ai.baseUrl}/responses`, {
       method: "POST",
@@ -109,7 +122,7 @@ export class OpenAIResponsesProvider implements LlmProvider {
   }
 
   async embed(input: string) {
-    const ai = endpoint();
+    const ai = await endpoint();
     const configured = process.env.OPENAI_EMBEDDING_MODEL ?? "text-embedding-3-small";
     const model = routedModel(configured, ai.gateway);
     const response = await fetch(`${ai.baseUrl}/embeddings`, {
