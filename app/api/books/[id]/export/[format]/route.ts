@@ -26,7 +26,7 @@ export async function GET(_:Request,{params}:{params:Promise<{id:string;format:s
       else if(exportFormat==="docx")body=new Uint8Array(await renderBookDocx(book));
       else {const markdown=bookToMarkdown(book);const text=exportFormat==="txt"?stripMarkdown(markdown):markdown;body=new TextEncoder().encode(text);}
       if(job)await supabase.from("export_jobs").update({status:"COMPLETED",finished_at:new Date().toISOString()}).eq("id",job.id);
-      const meta=formats[exportFormat];return new Response(body,{headers:{"content-type":meta.type,"content-disposition":`attachment; filename*=UTF-8''${encodeURIComponent(safeName(book.title))}.${meta.ext}`,"cache-control":"private, no-store"}});
+      const meta=formats[exportFormat];return new Response(body as unknown as BodyInit,{headers:{"content-type":meta.type,"content-disposition":`attachment; filename*=UTF-8''${encodeURIComponent(safeName(book.title))}.${meta.ext}`,"cache-control":"private, no-store"}});
     }catch(error){if(job)await supabase.from("export_jobs").update({status:"FAILED",error_message:error instanceof Error?error.message:String(error),finished_at:new Date().toISOString()}).eq("id",job.id);throw error;}
   }catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Export failed"},{status:400});}
 }
