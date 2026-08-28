@@ -1,15 +1,13 @@
 import { createServerClient } from "@supabase/ssr";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
+import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from "@/lib/supabase/config";
 import { createRemoteServiceSupabase, type RemoteServiceSupabase } from "@/lib/supabase/service-bridge";
 
 export async function createServerSupabase() {
   const cookieStore = await cookies();
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-  if (!url || !key) throw new Error("Supabase public environment variables are missing.");
 
-  return createServerClient(url, key, {
+  return createServerClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
     cookies: {
       getAll() {
         return cookieStore.getAll();
@@ -26,10 +24,9 @@ export async function createServerSupabase() {
 }
 
 export function createServiceSupabase(): RemoteServiceSupabase {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (url && serviceRole) {
-    return createSupabaseClient(url, serviceRole, {
+  if (serviceRole) {
+    return createSupabaseClient(SUPABASE_URL, serviceRole, {
       auth: { persistSession: false, autoRefreshToken: false }
     }) as unknown as RemoteServiceSupabase;
   }

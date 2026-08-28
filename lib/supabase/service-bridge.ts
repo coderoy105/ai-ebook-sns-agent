@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { getVercelOidcToken } from "@vercel/oidc";
+import { SUPABASE_URL } from "@/lib/supabase/config";
 
 type BridgeError = { message: string; code?: string; details?: string; hint?: string };
 type BridgeResult<T = unknown> = { data: T; error: BridgeError | null; count?: number | null };
@@ -23,16 +24,13 @@ type QueryState = {
 };
 
 async function bridgeRequest<T = unknown>(body: Record<string, unknown>): Promise<BridgeResult<T>> {
-  const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  if (!baseUrl) throw new Error("NEXT_PUBLIC_SUPABASE_URL is missing.");
-
   const oidcToken = process.env.VERCEL_OIDC_TOKEN ?? await getVercelOidcToken({
     project: "ai-book-studio",
     team: "koreassp105-1594s-projects"
   });
   if (!oidcToken) throw new Error("Vercel OIDC token is unavailable.");
 
-  const response = await fetch(`${baseUrl}/functions/v1/ai-book-service`, {
+  const response = await fetch(`${SUPABASE_URL}/functions/v1/ai-book-service`, {
     method: "POST",
     headers: {
       authorization: `Bearer ${oidcToken}`,
@@ -55,28 +53,10 @@ class RemoteQueryBuilder<T = LooseRow[]> implements PromiseLike<BridgeResult<T>>
     this.state = { kind: "query", table, action: "select", filters: [], orders: [] };
   }
 
-  select(columns = "*") {
-    this.state.select = columns;
-    return this;
-  }
-
-  insert(values: unknown) {
-    this.state.action = "insert";
-    this.state.values = values;
-    return this;
-  }
-
-  update(values: unknown) {
-    this.state.action = "update";
-    this.state.values = values;
-    return this;
-  }
-
-  delete() {
-    this.state.action = "delete";
-    return this;
-  }
-
+  select(columns = "*") { this.state.select = columns; return this; }
+  insert(values: unknown) { this.state.action = "insert"; this.state.values = values; return this; }
+  update(values: unknown) { this.state.action = "update"; this.state.values = values; return this; }
+  delete() { this.state.action = "delete"; return this; }
   upsert(values: unknown, options?: { onConflict?: string }) {
     this.state.action = "upsert";
     this.state.values = values;
@@ -99,20 +79,10 @@ class RemoteQueryBuilder<T = LooseRow[]> implements PromiseLike<BridgeResult<T>>
   }
 
   limit(value: number) { this.state.limit = value; return this; }
+  single(): RemoteQueryBuilder<LooseRow> { this.state.single = "single"; return this as unknown as RemoteQueryBuilder<LooseRow>; }
+  maybeSingle(): RemoteQueryBuilder<LooseRow> { this.state.single = "maybeSingle"; return this as unknown as RemoteQueryBuilder<LooseRow>; }
 
-  single(): RemoteQueryBuilder<LooseRow> {
-    this.state.single = "single";
-    return this as unknown as RemoteQueryBuilder<LooseRow>;
-  }
-
-  maybeSingle(): RemoteQueryBuilder<LooseRow> {
-    this.state.single = "maybeSingle";
-    return this as unknown as RemoteQueryBuilder<LooseRow>;
-  }
-
-  private execute() {
-    return bridgeRequest<T>(this.state as unknown as Record<string, unknown>);
-  }
+  private execute() { return bridgeRequest<T>(this.state as unknown as Record<string, unknown>); }
 
   then<TResult1 = BridgeResult<T>, TResult2 = never>(
     onfulfilled?: ((value: BridgeResult<T>) => TResult1 | PromiseLike<TResult1>) | null,
