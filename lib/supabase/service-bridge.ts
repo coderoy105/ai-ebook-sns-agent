@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 type BridgeError = { message: string; code?: string; details?: string; hint?: string };
-type BridgeResult<T = unknown> = { data: T | null; error: BridgeError | null; count?: number | null };
+type BridgeResult<T = unknown> = { data: T; error: BridgeError | null; count?: number | null };
 type Filter = { op: "eq" | "neq" | "lt" | "lte" | "gt" | "gte" | "in" | "is"; column: string; value: unknown };
 type Order = { column: string; ascending: boolean };
 type Action = "select" | "insert" | "update" | "delete" | "upsert";
@@ -35,9 +35,9 @@ async function bridgeRequest<T = unknown>(body: Record<string, unknown>): Promis
     body: JSON.stringify(body),
     cache: "no-store"
   });
-  const payload = await response.json().catch(() => ({ error: { message: `Bridge HTTP ${response.status}` } })) as BridgeResult<T>;
+  const payload = await response.json().catch(() => ({ data: null, error: { message: `Bridge HTTP ${response.status}` } })) as BridgeResult<T>;
   if (!response.ok && !payload.error) {
-    return { data: null, error: { message: `Bridge HTTP ${response.status}` } };
+    return { data: null as T, error: { message: `Bridge HTTP ${response.status}` } };
   }
   return payload;
 }
