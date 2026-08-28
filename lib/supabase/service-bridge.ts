@@ -1,8 +1,11 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 type BridgeError = { message: string; code?: string; details?: string; hint?: string };
 type BridgeResult<T = unknown> = { data: T | null; error: BridgeError | null; count?: number | null };
 type Filter = { op: "eq" | "neq" | "lt" | "lte" | "gt" | "gte" | "in" | "is"; column: string; value: unknown };
 type Order = { column: string; ascending: boolean };
 type Action = "select" | "insert" | "update" | "delete" | "upsert";
+export type LooseRow = Record<string, any>;
 
 type QueryState = {
   kind: "query";
@@ -39,7 +42,7 @@ async function bridgeRequest<T = unknown>(body: Record<string, unknown>): Promis
   return payload;
 }
 
-class RemoteQueryBuilder<T = unknown> implements PromiseLike<BridgeResult<T>> {
+class RemoteQueryBuilder<T = LooseRow[]> implements PromiseLike<BridgeResult<T>> {
   private state: QueryState;
 
   constructor(table: string) {
@@ -90,8 +93,16 @@ class RemoteQueryBuilder<T = unknown> implements PromiseLike<BridgeResult<T>> {
   }
 
   limit(value: number) { this.state.limit = value; return this; }
-  single() { this.state.single = "single"; return this; }
-  maybeSingle() { this.state.single = "maybeSingle"; return this; }
+
+  single(): RemoteQueryBuilder<LooseRow> {
+    this.state.single = "single";
+    return this as unknown as RemoteQueryBuilder<LooseRow>;
+  }
+
+  maybeSingle(): RemoteQueryBuilder<LooseRow> {
+    this.state.single = "maybeSingle";
+    return this as unknown as RemoteQueryBuilder<LooseRow>;
+  }
 
   private execute() {
     return bridgeRequest<T>(this.state as unknown as Record<string, unknown>);
@@ -106,13 +117,13 @@ class RemoteQueryBuilder<T = unknown> implements PromiseLike<BridgeResult<T>> {
 }
 
 export type RemoteServiceSupabase = {
-  from(table: string): RemoteQueryBuilder;
+  from(table: string): RemoteQueryBuilder<LooseRow[]>;
   rpc<T = unknown>(fn: string, args?: Record<string, unknown>): Promise<BridgeResult<T>>;
 };
 
 export function createRemoteServiceSupabase(): RemoteServiceSupabase {
   return {
-    from(table: string) { return new RemoteQueryBuilder(table); },
+    from(table: string) { return new RemoteQueryBuilder<LooseRow[]>(table); },
     rpc<T = unknown>(fn: string, args?: Record<string, unknown>) {
       return bridgeRequest<T>({ kind: "rpc", fn, args: args ?? {} });
     }
