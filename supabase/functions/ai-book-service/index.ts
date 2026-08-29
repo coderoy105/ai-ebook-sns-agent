@@ -11,11 +11,12 @@ const allowedTables = new Set([
   "books", "book_settings", "reader_profiles", "writing_styles", "book_blueprints", "parts", "chapters", "sections",
   "content_blocks", "story_bibles", "knowledge_maps", "book_memories", "sources", "citations", "templates", "pages",
   "revisions", "generation_jobs", "generation_steps", "job_logs", "token_usage", "book_reviews", "assets", "book_covers",
-  "export_jobs", "rate_limit_buckets", "plans", "subscriptions", "ai_provider_credentials"
+  "export_jobs", "rate_limit_buckets", "plans", "subscriptions", "ai_provider_credentials", "codex_connection_profiles"
 ]);
 const allowedRpcs = new Set([
   "consume_rate_limit", "match_book_memory", "store_openrouter_credential", "has_openrouter_credential",
-  "get_openrouter_credential", "delete_openrouter_credential"
+  "get_openrouter_credential", "delete_openrouter_credential", "store_codex_chatgpt_credential",
+  "has_codex_chatgpt_credential", "get_codex_chatgpt_credential", "delete_codex_chatgpt_credential"
 ]);
 const allowedFilterOps = new Set(["eq", "neq", "lt", "lte", "gt", "gte", "in", "is"]);
 
