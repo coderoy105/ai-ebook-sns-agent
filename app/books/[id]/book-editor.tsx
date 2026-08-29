@@ -21,11 +21,16 @@ function sortBook(book: Book) {
   };
 }
 
-function statusLabel(status: string) {
-  if (status === "GENERATING") return "집필 중";
+function statusLabel(status: string, jobStatus?: string) {
+  if (jobStatus === "WAITING_LIMIT") return "무료 한도 대기";
+  if (jobStatus === "NEEDS_RECONNECT") return "AI 재연결 필요";
+  if (jobStatus === "PAUSED_ERROR") return "오류로 일시정지";
+  if (jobStatus === "QUEUED") return "작업 등록 중";
+  if (status === "GENERATING") return "백그라운드 집필 중";
   if (status === "PAUSED") return "일시정지";
   if (status === "COMPLETED") return "완료";
   if (status === "PLANNING") return "구성 중";
+  if (status === "CANCELLED") return "취소됨";
   return status;
 }
 
@@ -72,7 +77,7 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
   const [busy,setBusy] = useState(false);
   const [freeConnected,setFreeConnected] = useState(false);
   const [logs,setLogs] = useState<GenerationLog[]>([]);
-  const [status,setStatus] = useState({status:book.status,progress:Number(book.progress),quality_score:book.quality_score,quality_scores:book.quality_scores});
+  const [status,setStatus] = useState({status:book.status,jobStatus:"",progress:Number(book.progress),quality_score:book.quality_score,quality_scores:book.quality_scores});
   const [history,setHistory] = useState<Revision[]>([]);
   const saveTimer = useRef<ReturnType<typeof setTimeout>|null>(null);
 
@@ -80,19 +85,35 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
     const res=await fetch(`/api/books/${book.id}/status`,{cache:"no-store"});
     if(!res.ok) return;
     const data=await res.json();
-    setStatus({status:data.book.status,progress:Number(data.book.progress),quality_score:data.book.quality_score,quality_scores:data.book.quality_scores??{}});
+    setStatus({
+      status:data.book.status,
+      jobStatus:data.job?.status??"",
+      progress:Number(data.book.progress),
+      quality_score:data.book.quality_score,
+      quality_scores:data.book.quality_scores??{}
+    });
     setLogs(data.logs??[]);
   },[book.id]);
 
-  useEffect(()=>{
-    const connectionTimer=setTimeout(()=>setFreeConnected(Boolean(getFreeAiKey())),0);
-    const initialTimer=setTimeout(()=>{void refreshStatus();},0);
-    if(!["GENERATING","REVIEWING","PAUSED","PLANNING"].includes(status.status)) {
-      return()=>{clearTimeout(connectionTimer);clearTimeout(initialTimer);};
+  const refreshConnection = useCallback(async()=>{
+    const localConnected=Boolean(getFreeAiKey());
+    try {
+      const res=await fetch("/api/auth/openrouter/connection",{cache:"no-store"});
+      const data=await res.json();
+      setFreeConnected(localConnected || (res.ok && data.connected===true));
+    } catch {
+      setFreeConnected(localConnected);
     }
-    const timer=setInterval(()=>{void refreshStatus();},5000);
+  },[]);
+
+  useEffect(()=>{
+    const connectionTimer=setTimeout(()=>{void refreshConnection();},0);
+    const initialTimer=setTimeout(()=>{void refreshStatus();},0);
+    const active=["GENERATING","REVIEWING","PAUSED","PLANNING"].includes(status.status) || ["QUEUED","GENERATING","WAITING_LIMIT","PAUSED"].includes(status.jobStatus);
+    if(!active) return()=>{clearTimeout(connectionTimer);clearTimeout(initialTimer);};
+    const timer=setInterval(()=>{void refreshStatus();},3000);
     return()=>{clearTimeout(connectionTimer);clearTimeout(initialTimer);clearInterval(timer);};
-  },[refreshStatus,status.status]);
+  },[refreshConnection,refreshStatus,status.jobStatus,status.status]);
 
   useEffect(()=>{
     const timer=setTimeout(()=>{
@@ -172,37 +193,25 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
   }
 
   async function startGeneration(){
-    const key=getFreeAiKey();
-    if(!key){await connectFreeAi();return;}
-    setFreeConnected(true);
     setBusy(true);
     try{
-      if(status.status==="PAUSED"||status.status==="CANCELLED") await control("resume");
-      setStatus(s=>({...s,status:"GENERATING"}));
-      for(let step=0;step<500;step++){
-        const r=await fetch(`/api/books/${book.id}/generate-free`,{method:"POST",headers:{"x-openrouter-key":key}});
-        const data=await r.json();
-        if(!r.ok){
-          if(r.status===409&&(data.paused||data.cancelled)) break;
-          if(r.status===429&&data.error==="FREE_AI_DAILY_LIMIT"){
-            alert("오늘 무료 AI 일일 한도에 도달했습니다. 지금까지 원고는 모두 저장됐습니다. 다음 무료 한도에서 '무료 이어서 생성'을 누르면 계속됩니다.");
-            break;
-          }
-          throw new Error(data.error??"무료 책 생성에 실패했습니다.");
-        }
-        setStatus(s=>({...s,status:data.done?"COMPLETED":"GENERATING",progress:Number(data.progress??s.progress)}));
-        await refreshStatus();
-        if(data.done){
-          alert("무료 AI 책 생성이 완료되었습니다.");
-          location.reload();
-          break;
-        }
+      const key=getFreeAiKey();
+      const headers:Record<string,string>={};
+      if(key) headers["x-openrouter-key"]=key;
+      const r=await fetch(`/api/books/${book.id}/generate`,{method:"POST",headers});
+      const data=await r.json();
+      if(r.status===428 || data.reconnect){
+        await connectFreeAi();
+        return;
       }
+      if(!r.ok) throw new Error(data.error??"백그라운드 책 생성 시작에 실패했습니다.");
+      setFreeConnected(true);
+      setStatus(s=>({...s,status:data.done?"COMPLETED":"GENERATING",jobStatus:data.done?"COMPLETED":"GENERATING",progress:Number(data.progress??s.progress)}));
+      await refreshStatus();
     }catch(error){
-      alert(error instanceof Error?error.message:"무료 책 생성에 실패했습니다.");
+      alert(error instanceof Error?error.message:"백그라운드 책 생성 시작에 실패했습니다.");
     }finally{
       setBusy(false);
-      void refreshStatus();
     }
   }
 
@@ -234,6 +243,8 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
   }
 
   const scores=status.quality_scores??{};
+  const backgroundRunning=status.status==="GENERATING" || ["QUEUED","GENERATING","WAITING_LIMIT"].includes(status.jobStatus);
+  const needsReconnect=status.jobStatus==="NEEDS_RECONNECT";
 
   return <div className="editor-shell">
     <aside className="editor-sidebar">
@@ -271,15 +282,22 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
 
     <aside className="ai-panel">
       <section className="ai-module generation-module">
-        <div className="module-heading"><h3>무료 AI 생성</h3><span className={`state-badge state-${status.status.toLowerCase()}`}>{statusLabel(status.status)}</span></div>
+        <div className="module-heading"><h3>무료 AI 생성</h3><span className={`state-badge state-${(status.jobStatus||status.status).toLowerCase()}`}>{statusLabel(status.status,status.jobStatus)}</span></div>
         <div className="generation-number"><strong>{Math.round(status.progress)}%</strong><span>전체 원고 진행률</span></div>
         <div className="progress-track"><span style={{width:`${Math.min(100,status.progress)}%`}}/></div>
-        <p>{freeConnected?"OpenRouter 무료 모델이 연결되어 있습니다.":"무료 AI를 연결하면 Section 단위로 원고를 작성합니다."}</p>
+        <p>{status.jobStatus==="WAITING_LIMIT"
+          ? "오늘 무료 한도를 다 사용했습니다. 작성된 원고는 저장됐고 Workflow가 대기 후 자동으로 이어갑니다."
+          : backgroundRunning
+            ? "백그라운드에서 집필 중입니다. 다른 화면으로 이동하거나 브라우저를 닫아도 계속 진행됩니다."
+            : freeConnected
+              ? "무료 AI가 서버 Vault에도 연결되어 있어 백그라운드 생성이 가능합니다."
+              : "무료 AI를 한 번 연결하면 이후 생성 작업은 백그라운드에서 계속됩니다."}</p>
         <div className="panel-actions">
-          {!freeConnected&&<button className="button button-primary" onClick={connectFreeAi}>무료 AI 연결</button>}
-          {freeConnected&&status.status!=="COMPLETED"&&status.status!=="PAUSED"&&!busy&&<button className="button button-primary" onClick={startGeneration}>{status.progress>0?"이어서 생성":"책 생성 시작"}</button>}
-          {busy&&<button className="button secondary" onClick={()=>control("pause")}>현재 Section 후 정지</button>}
-          {freeConnected&&status.status==="PAUSED"&&!busy&&<button className="button button-primary" onClick={startGeneration}>이어서 생성</button>}
+          {(!freeConnected||needsReconnect)&&<button className="button button-primary" onClick={connectFreeAi}>무료 AI {needsReconnect?"다시 ":""}연결</button>}
+          {freeConnected&&!backgroundRunning&&status.status!=="COMPLETED"&&status.status!=="PAUSED"&&!busy&&<button className="button button-primary" onClick={startGeneration}>{status.progress>0?"백그라운드 이어서 생성":"백그라운드 책 생성 시작"}</button>}
+          {freeConnected&&status.status==="PAUSED"&&!needsReconnect&&!busy&&<button className="button button-primary" onClick={startGeneration}>백그라운드 이어서 생성</button>}
+          {busy&&<button className="button secondary" disabled>작업 등록 중…</button>}
+          {backgroundRunning&&status.jobStatus!=="WAITING_LIMIT"&&<button className="button secondary" onClick={()=>control("pause")}>현재 Section 후 정지</button>}
           {["GENERATING","PAUSED"].includes(status.status)&&<button className="button ghost" onClick={()=>control("cancel")}>생성 취소</button>}
         </div>
       </section>
