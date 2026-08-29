@@ -1,12 +1,16 @@
 import { FatalError, sleep } from "workflow";
 import { createServiceSupabase } from "@/lib/supabase/server";
-import { OpenRouterFreeProvider } from "@/lib/ai/openrouter-free";
+import {
+  backgroundProviderLabel,
+  generateBackgroundStructured,
+  type BackgroundAiProvider
+} from "@/lib/ai/background-provider";
 import { sectionDraftJsonSchema } from "@/lib/ai/json-schemas";
 import { SectionDraftSchema } from "@/lib/ai/schemas";
 import { sectionWriterPrompt, sectionWriterSystem } from "@/lib/ai/prompts";
 import { composeBookPages } from "@/lib/design/compose";
 
-type WorkflowInput = { bookId: string; userId: string; jobId: string };
+type WorkflowInput = { bookId: string; userId: string; jobId: string; provider: BackgroundAiProvider };
 type Relation<T> = T | T[] | null;
 type OutlineRow = {
   id: string;
@@ -39,7 +43,7 @@ type SectionContext = {
 type SectionResult =
   | { kind: "completed"; title: string; wordCount: number; model: string }
   | { kind: "already-completed" }
-  | { kind: "daily-limit" }
+  | { kind: "usage-limit" }
   | { kind: "connection-expired" }
   | { kind: "temporary-error"; message: string };
 
@@ -56,8 +60,9 @@ function outlinePosition(row: OutlineRow) {
 export async function generateFreeBookWorkflow(input: WorkflowInput) {
   "use workflow";
 
+  const providerLabel = backgroundProviderLabel(input.provider);
   try {
-    await markJob(input.jobId, "GENERATING", "백그라운드 무료 AI 집필을 시작했습니다.", 0);
+    await markJob(input.jobId, "GENERATING", `${providerLabel} 백그라운드 집필을 시작했습니다.`, 0);
     const sections = await getOutline(input.bookId);
     const total = sections.length;
 
@@ -79,7 +84,7 @@ export async function generateFreeBookWorkflow(input: WorkflowInput) {
           return { status: "cancelled" };
         }
 
-        const result = await generateFreeSectionStep({ ...input, sectionId: section.id });
+        const result = await generateSectionStep({ ...input, sectionId: section.id });
         if (result.kind === "completed" || result.kind === "already-completed") {
           const progress = progressFrom(index + 1, total);
           await markSectionProgress(input, section.id, index + 1, total, progress, result);
@@ -87,15 +92,17 @@ export async function generateFreeBookWorkflow(input: WorkflowInput) {
           continue;
         }
 
-        if (result.kind === "daily-limit") {
+        if (result.kind === "usage-limit") {
           await markJob(
             input.jobId,
             "WAITING_LIMIT",
-            "OpenRouter 무료 일일 한도에 도달했습니다. 저장된 위치에서 24시간 뒤 자동으로 다시 시도합니다.",
+            input.provider === "codex"
+              ? "ChatGPT/Codex 사용 한도에 도달했습니다. 현재 Section 이전까지 저장되어 있으며 1시간 뒤 자동 확인합니다."
+              : "OpenRouter 무료 일일 한도에 도달했습니다. 현재 Section 이전까지 저장되어 있으며 24시간 뒤 자동 재개합니다.",
             progressFrom(index, total)
           );
-          await sleep("24h");
-          await markJob(input.jobId, "GENERATING", "무료 한도 대기 후 자동으로 집필을 재개합니다.", progressFrom(index, total));
+          await sleep(input.provider === "codex" ? "1h" : "24h");
+          await markJob(input.jobId, "GENERATING", `${providerLabel} 사용 한도 대기 후 자동으로 집필을 재개합니다.`, progressFrom(index, total));
           continue;
         }
 
@@ -139,14 +146,7 @@ async function getBookControlState(bookId: string) {
   return data.status as string;
 }
 
-async function loadOpenRouterKey(userId: string) {
-  const supabase = createServiceSupabase();
-  const { data, error } = await supabase.rpc<string | null>("get_openrouter_credential", { p_user_id: userId });
-  if (error) throw new Error(error.message);
-  return typeof data === "string" ? data : null;
-}
-
-async function generateFreeSectionStep(input: WorkflowInput & { sectionId: string }): Promise<SectionResult> {
+async function generateSectionStep(input: WorkflowInput & { sectionId: string }): Promise<SectionResult> {
   "use step";
   const supabase = createServiceSupabase();
 
@@ -160,9 +160,6 @@ async function generateFreeSectionStep(input: WorkflowInput & { sectionId: strin
   const chapter = one(section.chapter);
   const book = one(section.book);
   if (!chapter || !book || book.user_id !== input.userId) throw new FatalError("BOOK_ACCESS_DENIED");
-
-  const key = await loadOpenRouterKey(input.userId);
-  if (!key) return { kind: "connection-expired" };
 
   const { data: previousRows } = await supabase.from("sections")
     .select("title,summary")
@@ -179,12 +176,10 @@ async function generateFreeSectionStep(input: WorkflowInput & { sectionId: strin
   ]);
 
   try {
-    const provider = new OpenRouterFreeProvider(key);
-    const draft = await provider.generateStructured({
-      model: "openrouter/free",
-      schemaName: "free_section_draft",
+    const draft = await generateBackgroundStructured(input.provider, input.userId, {
+      schemaName: "background_section_draft",
       jsonSchema: sectionDraftJsonSchema as unknown as Record<string, unknown>,
-      system: `${sectionWriterSystem()}\nFREE MODE: No live web research is available in this pass. Never fabricate citations, URLs, statistics, studies, or claims of having checked the web. Prefer durable explanations and clearly qualify uncertain facts.`,
+      system: `${sectionWriterSystem()}\nBACKGROUND MODE: Live web research is disabled for this pass. Never fabricate citations, URLs, statistics, studies, or claims of having checked the web. Prefer durable explanations and clearly qualify uncertain facts.`,
       prompt: sectionWriterPrompt({
         bookSummary: `${book.title} — ${book.subtitle ?? ""}\n${book.idea}`,
         chapterTitle: chapter.title,
@@ -196,7 +191,7 @@ async function generateFreeSectionStep(input: WorkflowInput & { sectionId: strin
         writingStyle: one(book.writing_styles) ?? {},
         relevantMemory: previousSummaries.map((row) => ({ type: "previous_section", title: row.title, content: row.summary })),
         previousSectionSummary: previousSummaries[0]?.summary ?? undefined,
-        researchNotes: "None — free mode does not perform live research.",
+        researchNotes: "None — this background pass does not perform live research.",
         storyBible: one(book.story_bibles)?.data ?? null,
         knowledgeMap: one(book.knowledge_maps)?.data ?? null
       }),
@@ -217,7 +212,7 @@ async function generateFreeSectionStep(input: WorkflowInput & { sectionId: strin
       supabase.from("token_usage").insert({
         user_id: input.userId,
         book_id: input.bookId,
-        operation: "FREE_SECTION_WRITE_BACKGROUND",
+        operation: input.provider === "codex" ? "CODEX_LUNA_SECTION_WRITE_BACKGROUND" : "FREE_SECTION_WRITE_BACKGROUND",
         model: draft.usage.model,
         input_tokens: draft.usage.inputTokens,
         output_tokens: draft.usage.outputTokens,
@@ -232,9 +227,14 @@ async function generateFreeSectionStep(input: WorkflowInput & { sectionId: strin
     return { kind: "completed", title: draft.value.title, wordCount, model: draft.usage.model };
   } catch (error) {
     await supabase.from("sections").update({ status: "PLANNED" }).eq("id", section.id);
-    const message = error instanceof Error ? error.message : "FREE_AI_FAILED";
-    if (message === "FREE_AI_DAILY_LIMIT") return { kind: "daily-limit" };
-    if (message === "FREE_AI_CONNECTION_EXPIRED" || message === "FREE_AI_CONNECTION_REQUIRED") return { kind: "connection-expired" };
+    const message = error instanceof Error ? error.message : "BACKGROUND_AI_FAILED";
+    if (message === "FREE_AI_DAILY_LIMIT" || message === "CODEX_USAGE_LIMIT") return { kind: "usage-limit" };
+    if (
+      message === "FREE_AI_CONNECTION_EXPIRED" ||
+      message === "FREE_AI_CONNECTION_REQUIRED" ||
+      message === "CODEX_CONNECTION_EXPIRED" ||
+      message === "CODEX_CONNECTION_REQUIRED"
+    ) return { kind: "connection-expired" };
     if (error instanceof FatalError) throw error;
     return { kind: "temporary-error", message };
   }
@@ -260,7 +260,7 @@ async function markSectionProgress(
   "use step";
   const supabase = createServiceSupabase();
   const message = result.kind === "completed"
-    ? `백그라운드 Section ${ordinal}/${total} 완료: ${result.title}`
+    ? `백그라운드 Section ${ordinal}/${total} 완료: ${result.title} · ${backgroundProviderLabel(input.provider)}`
     : `이미 완료된 Section ${ordinal}/${total}을 건너뜁니다.`;
   await Promise.all([
     supabase.from("books").update({ status: "GENERATING", progress, current_section_id: sectionId }).eq("id", input.bookId),
@@ -269,7 +269,7 @@ async function markSectionProgress(
       generation_job_id: input.jobId,
       level: "info",
       message,
-      metadata: result.kind === "completed" ? { sectionId, wordCount: result.wordCount, model: result.model } : { sectionId }
+      metadata: result.kind === "completed" ? { sectionId, wordCount: result.wordCount, model: result.model, provider: input.provider } : { sectionId }
     })
   ]);
 }
@@ -280,7 +280,7 @@ async function markNeedsReconnect(input: WorkflowInput, progress: number) {
   await Promise.all([
     supabase.from("books").update({ status: "PAUSED" }).eq("id", input.bookId),
     supabase.from("generation_jobs").update({ status: "NEEDS_RECONNECT", progress, updated_at: new Date().toISOString() }).eq("id", input.jobId),
-    supabase.from("job_logs").insert({ generation_job_id: input.jobId, level: "warning", message: "무료 AI 연결이 만료되었습니다. 다시 연결하면 저장된 위치에서 이어서 생성할 수 있습니다." })
+    supabase.from("job_logs").insert({ generation_job_id: input.jobId, level: "warning", message: `${backgroundProviderLabel(input.provider)} 연결이 만료되었습니다. 다시 연결하면 저장된 위치에서 이어서 생성할 수 있습니다.` })
   ]);
 }
 
@@ -290,7 +290,7 @@ async function markTemporaryFailure(input: WorkflowInput, message: string, progr
   await Promise.all([
     supabase.from("books").update({ status: "PAUSED" }).eq("id", input.bookId),
     supabase.from("generation_jobs").update({ status: "PAUSED_ERROR", progress, updated_at: new Date().toISOString() }).eq("id", input.jobId),
-    supabase.from("job_logs").insert({ generation_job_id: input.jobId, level: "warning", message: `무료 AI 제공자 오류로 일시정지: ${message}` })
+    supabase.from("job_logs").insert({ generation_job_id: input.jobId, level: "warning", message: `${backgroundProviderLabel(input.provider)} 제공자 오류로 일시정지: ${message}` })
   ]);
 }
 
@@ -305,7 +305,7 @@ async function finalizeBook(input: WorkflowInput, pageCount: number) {
   await Promise.all([
     supabase.from("books").update({ status: "COMPLETED", progress: 100, current_section_id: null }).eq("id", input.bookId),
     supabase.from("generation_jobs").update({ status: "COMPLETED", progress: 100, finished_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", input.jobId),
-    supabase.from("job_logs").insert({ generation_job_id: input.jobId, level: "info", message: `백그라운드 무료 AI 책 완성 · ${pageCount} pages composed` })
+    supabase.from("job_logs").insert({ generation_job_id: input.jobId, level: "info", message: `${backgroundProviderLabel(input.provider)} 백그라운드 책 완성 · ${pageCount} pages composed` })
   ]);
 }
 
@@ -315,7 +315,7 @@ async function failWorkflow(input: WorkflowInput, message: string) {
   await Promise.all([
     supabase.from("books").update({ status: "PAUSED" }).eq("id", input.bookId),
     supabase.from("generation_jobs").update({ status: "FAILED", updated_at: new Date().toISOString() }).eq("id", input.jobId),
-    supabase.from("job_logs").insert({ generation_job_id: input.jobId, level: "error", message: `백그라운드 생성 실패: ${message}` })
+    supabase.from("job_logs").insert({ generation_job_id: input.jobId, level: "error", message: `${backgroundProviderLabel(input.provider)} 백그라운드 생성 실패: ${message}` })
   ]);
 }
 
