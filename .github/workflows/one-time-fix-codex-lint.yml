@@ -1,0 +1,29 @@
+name: One-time fix Codex bridge lint
+
+on:
+  push:
+    paths:
+      - '.github/workflows/one-time-fix-codex-lint.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Fix reserved module variable
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('app/api/core/[...path]/route.ts')
+          s=p.read_text().replace('  const module = await import("@/lib/ai/provider-connection");\n  return module.hasBackgroundCredential(userId, provider);', '  const connectionModule = await import("@/lib/ai/provider-connection");\n  return connectionModule.hasBackgroundCredential(userId, provider);')
+          p.write_text(s)
+          PY
+          git config user.name "AI Book Studio Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add app/api/core/'[...path]'/route.ts
+          git commit -m "fix: avoid reserved module variable in Codex bridge"
+          git push origin HEAD:main
