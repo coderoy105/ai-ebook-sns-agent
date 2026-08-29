@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { BookEditorShell } from "@/app/books/[id]/book-editor-shell";
 import { GenerationProgress } from "@/app/books/[id]/generation-progress";
 import type { Book } from "@/app/books/[id]/book-editor";
 
 export default function BookWorkspacePage() {
+  const router = useRouter();
   const [bookId, setBookId] = useState("");
   const [book, setBook] = useState<Book | null>(null);
   const [loading, setLoading] = useState(true);
@@ -15,19 +17,21 @@ export default function BookWorkspacePage() {
 
   useEffect(() => {
     let active = true;
-    const id = new URL(window.location.href).searchParams.get("bookId")?.trim() ?? "";
-    if (!id) {
-      setError("BOOK_ID_REQUIRED");
-      setLoading(false);
-      return;
-    }
-    setBookId(id);
     const supabase = createClient();
     void (async () => {
+      await Promise.resolve();
+      const id = new URL(window.location.href).searchParams.get("bookId")?.trim() ?? "";
+      if (!active) return;
+      if (!id) {
+        setError("BOOK_ID_REQUIRED");
+        setLoading(false);
+        return;
+      }
+      setBookId(id);
       try {
         const { data: userData } = await supabase.auth.getUser();
         if (!userData.user) {
-          location.assign(`/login?next=${encodeURIComponent(`/book?bookId=${id}`)}`);
+          router.replace(`/login?next=${encodeURIComponent(`/book?bookId=${id}`)}`);
           return;
         }
         const { data, error: queryError } = await supabase.from("books").select(`
@@ -46,7 +50,7 @@ export default function BookWorkspacePage() {
       }
     })();
     return () => { active = false; };
-  }, []);
+  }, [router]);
 
   if (loading) return <main className="main"><p className="muted">원고를 불러오는 중입니다…</p></main>;
   if (!book || !bookId) {
