@@ -24,6 +24,16 @@ function codexEntry() {
   return path.join(path.dirname(packageJson), "bin", "codex.js");
 }
 
+function sanitizeAppServerDetail(value) {
+  return String(value ?? "")
+    .replace(/Bearer\s+[A-Za-z0-9._~-]+/gi, "Bearer [redacted]")
+    .replace(/\"(access_token|refresh_token|id_token|token)\"\s*:\s*\"[^\"]+\"/gi, '"$1":"[redacted]"')
+    .replace(/[A-Za-z0-9_-]{80,}/g, "[redacted]")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(-1200);
+}
+
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -60,20 +70,35 @@ class AppServerClient {
 
   static async start(codexHome) {
     const child = spawn(process.execPath, [codexEntry(), "app-server", "--listen", "stdio://"], {
-      env: { ...process.env, CODEX_HOME: codexHome, NO_COLOR: "1" },
+      env: {
+        ...process.env,
+        CODEX_HOME: codexHome,
+        NO_COLOR: "1",
+        LOG_FORMAT: "json",
+        RUST_LOG: process.env.CODEX_APP_SERVER_RUST_LOG ?? "warn",
+        CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED: "1"
+      },
       stdio: ["pipe", "pipe", "pipe"]
     });
     const client = new AppServerClient(child);
+    let stderrText = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      stderrText = `${stderrText}${String(chunk)}`.slice(-12000);
+    });
     const lines = readline.createInterface({ input: child.stdout });
     lines.on("line", (line) => client.handleLine(line));
-    child.once("exit", () => client.failAll(new Error("CODEX_APP_SERVER_EXITED")));
-    child.once("error", () => client.failAll(new Error("CODEX_APP_SERVER_FAILED")));
-    child.stderr.resume();
+    child.once("exit", (code, signal) => {
+      const detail = sanitizeAppServerDetail(stderrText);
+      const suffix = `${code ?? "null"}:${signal ?? "none"}`;
+      client.failAll(new Error(detail ? `CODEX_APP_SERVER_EXITED:${suffix}:${detail}` : `CODEX_APP_SERVER_EXITED:${suffix}`));
+    });
+    child.once("error", (error) => client.failAll(new Error(`CODEX_APP_SERVER_FAILED:${sanitizeAppServerDetail(error?.message)}`)));
     await client.request("initialize", {
       clientInfo: { name: "ai-book-studio-worker", title: "AI Book Studio Worker", version: "1.0.0" },
-      capabilities: { experimentalApi: true }
+      capabilities: { experimentalApi: true, requestAttestation: false }
     }, 30000);
-    client.notify("initialized", {});
+    client.notify("initialized");
     return client;
   }
 
@@ -113,12 +138,12 @@ class AppServerClient {
         reject(new Error("CODEX_RPC_TIMEOUT"));
       }, timeoutMs);
       this.pending.set(String(id), { resolve, reject, timer });
-      this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+      this.child.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
     });
   }
 
   notify(method, params) {
-    if (!this.closed) this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`);
+    if (!this.closed) this.child.stdin.write(`${JSON.stringify({ method, params })}\n`);
   }
 
   subscribe(listener) {
