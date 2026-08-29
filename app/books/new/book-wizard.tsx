@@ -12,6 +12,8 @@ const templates = [
   { id: "quiet-fiction", name: "Quiet Fiction", note: "읽기 중심 · 낮은 시각 밀도 · 장면 중심 흐름" }
 ];
 
+const BOOK_WIZARD_DRAFT_KEY = "ai-book-studio:book-wizard-draft:v1";
+
 const planningCheckpoints = [
   { title: "설정 전달", note: "독자 · 문체 · 분량 · 디자인" },
   { title: "무료 AI 응답", note: "Book Blueprint · 전체 목차" },
@@ -40,6 +42,12 @@ type PlanningProgress = {
   elapsedSeconds: number;
 };
 
+type WizardDraft = {
+  form?: Partial<FormState>;
+  step?: number;
+  updatedAt?: number;
+};
+
 const initial: FormState = {
   idea: "",
   bookType: "AI / 실용서",
@@ -51,6 +59,25 @@ const initial: FormState = {
   templateMood: "modern-editorial",
   mode: "quick"
 };
+
+function clampStep(value: number) {
+  return Math.min(6, Math.max(0, Number.isFinite(value) ? Math.trunc(value) : 0));
+}
+
+function restoreDraft(raw: string | null): { form: FormState; step: number } | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as WizardDraft;
+    if (!parsed || typeof parsed !== "object" || !parsed.form || typeof parsed.form !== "object") return null;
+    const merged = { ...initial, ...parsed.form } as FormState;
+    if (!(["beginner", "intermediate", "advanced", "expert"] as const).includes(merged.knowledgeLevel)) merged.knowledgeLevel = initial.knowledgeLevel;
+    if (!(["quick", "advanced"] as const).includes(merged.mode)) merged.mode = initial.mode;
+    merged.targetPages = Number.isFinite(Number(merged.targetPages)) ? Math.min(500, Math.max(20, Number(merged.targetPages))) : initial.targetPages;
+    return { form: merged, step: clampStep(Number(parsed.step ?? 0)) };
+  } catch {
+    return null;
+  }
+}
 
 function checkpointClass(phase: PlanningPhase, index: number) {
   if (phase === "error") return "";
@@ -105,10 +132,19 @@ export function BookWizard() {
   const [error, setError] = useState("");
   const [freeConnected, setFreeConnected] = useState(false);
   const [planningProgress, setPlanningProgress] = useState<PlanningProgress | null>(null);
+  const [draftRestored, setDraftRestored] = useState(false);
   const steps = ["아이디어","책 종류","독자","문체","분량","디자인","검토"];
 
   useEffect(() => {
-    const timer = setTimeout(() => setFreeConnected(Boolean(getFreeAiKey())), 0);
+    const timer = setTimeout(() => {
+      setFreeConnected(Boolean(getFreeAiKey()));
+      const draft = restoreDraft(localStorage.getItem(BOOK_WIZARD_DRAFT_KEY));
+      if (draft) {
+        setForm(draft.form);
+        setStep(draft.step);
+        setDraftRestored(true);
+      }
+    }, 0);
     return () => clearTimeout(timer);
   }, []);
 
@@ -142,13 +178,33 @@ export function BookWizard() {
     return Math.round(form.targetPages * wordsPerPage).toLocaleString();
   }, [form.targetPages, form.bookType]);
 
+  function persistDraft(nextForm: FormState, nextStep: number) {
+    try {
+      localStorage.setItem(BOOK_WIZARD_DRAFT_KEY, JSON.stringify({ form: nextForm, step: clampStep(nextStep), updatedAt: Date.now() } satisfies WizardDraft));
+    } catch {
+      // Browser storage can be unavailable in private/restricted contexts; the UI should keep working.
+    }
+  }
+
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     if (!loading && planningProgress?.phase === "error") setPlanningProgress(null);
-    setForm((prev) => ({ ...prev, [key]: value }));
+    setForm((previous) => {
+      const next = { ...previous, [key]: value };
+      persistDraft(next, step);
+      return next;
+    });
+    setDraftRestored(false);
+  }
+
+  function goToStep(nextStep: number) {
+    const next = clampStep(nextStep);
+    setStep(next);
+    persistDraft(form, next);
   }
 
   async function connectFreeAi() {
     setError("");
+    persistDraft(form, step);
     await beginFreeAiConnect("/books/new");
   }
 
@@ -164,6 +220,7 @@ export function BookWizard() {
       return;
     }
 
+    persistDraft(form, step);
     setLoading(true);
     setError("");
     setPlanningProgress({
@@ -202,16 +259,19 @@ export function BookWizard() {
         detail: "책 작업실을 여는 중입니다.",
         elapsedSeconds: previous?.elapsedSeconds ?? 0
       }));
+      try { localStorage.removeItem(BOOK_WIZARD_DRAFT_KEY); } catch { /* no-op */ }
+      setDraftRestored(false);
       await new Promise((resolve) => setTimeout(resolve, 320));
       router.push(`/books/${payload.bookId}`);
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "생성 실패";
       setError(message);
+      persistDraft(form, step);
       setPlanningProgress((previous) => ({
         percent: previous?.percent ?? 0,
         phase: "error",
         label: "기획 생성을 완료하지 못했습니다",
-        detail: "아래 오류 내용을 확인한 뒤 다시 시도할 수 있습니다.",
+        detail: "아래 오류 내용을 확인한 뒤 다시 시도할 수 있습니다. 입력한 설정은 임시저장되어 있습니다.",
         elapsedSeconds: previous?.elapsedSeconds ?? 0
       }));
     } finally {
@@ -337,9 +397,12 @@ export function BookWizard() {
           {error && <p className="notice" role="alert">{error}</p>}
 
           <footer className="wizard-actions">
-            <button className="button secondary" disabled={step === 0 || loading} onClick={() => setStep((value) => Math.max(0, value - 1))}>이전</button>
+            <div style={{ marginRight: "auto", alignSelf: "center" }} className="muted" aria-live="polite">
+              <small>{draftRestored ? "이전에 입력한 임시저장을 복원했습니다." : "입력 내용은 이 기기에 자동 임시저장됩니다."}</small>
+            </div>
+            <button className="button secondary" disabled={step === 0 || loading} onClick={() => goToStep(step - 1)}>이전</button>
             {step < steps.length - 1 ? (
-              <button className="button button-primary" disabled={loading || (step === 0 && form.idea.trim().length < 8)} onClick={() => setStep((value) => Math.min(steps.length - 1, value + 1))}>다음 단계</button>
+              <button className="button button-primary" disabled={loading || (step === 0 && form.idea.trim().length < 8)} onClick={() => goToStep(step + 1)}>다음 단계</button>
             ) : (
               <button className="button button-primary" disabled={loading || form.idea.trim().length < 8} onClick={createBook}>
                 {loading ? `${Math.round(planningProgress?.percent ?? 0)}% · 기획 생성 중` : freeConnected ? "Book Blueprint 생성" : "무료 AI 연결 후 생성"}
