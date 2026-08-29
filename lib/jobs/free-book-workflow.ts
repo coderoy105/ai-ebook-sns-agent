@@ -47,6 +47,25 @@ type SectionResult =
   | { kind: "connection-expired" }
   | { kind: "temporary-error"; message: string };
 
+type BookStepRequest =
+  | { action: "mark"; input: WorkflowInput; status: string; message: string; progress: number }
+  | { action: "outline"; input: WorkflowInput }
+  | { action: "control"; input: WorkflowInput }
+  | { action: "section"; input: WorkflowInput; sectionId: string }
+  | { action: "progress"; input: WorkflowInput; sectionId: string; ordinal: number; total: number; progress: number; result: Extract<SectionResult, { kind: "completed" | "already-completed" }> }
+  | { action: "reconnect"; input: WorkflowInput; progress: number }
+  | { action: "temporary-failure"; input: WorkflowInput; message: string; progress: number }
+  | { action: "compose"; input: WorkflowInput }
+  | { action: "finalize"; input: WorkflowInput; pageCount: number }
+  | { action: "fail"; input: WorkflowInput; message: string };
+
+type BookStepResult =
+  | { kind: "ok" }
+  | { kind: "outline"; sections: OutlineRow[] }
+  | { kind: "control"; state: string }
+  | { kind: "composed"; pageCount: number }
+  | SectionResult;
+
 function one<T>(value: Relation<T>): T | null {
   return Array.isArray(value) ? (value[0] ?? null) : value;
 }
@@ -62,8 +81,9 @@ export async function generateFreeBookWorkflow(input: WorkflowInput) {
 
   const providerLabel = backgroundProviderLabel(input.provider);
   try {
-    await markJob(input.jobId, "GENERATING", `${providerLabel} 백그라운드 집필을 시작했습니다.`, 0);
-    const sections = await getOutline(input.bookId);
+    await bookStep({ action: "mark", input, status: "GENERATING", message: `${providerLabel} 백그라운드 집필을 시작했습니다.`, progress: 0 });
+    const outline = await bookStep({ action: "outline", input }) as { kind: "outline"; sections: OutlineRow[] };
+    const sections = outline.sections;
     const total = sections.length;
 
     for (let index = 0; index < total; index++) {
@@ -72,61 +92,99 @@ export async function generateFreeBookWorkflow(input: WorkflowInput) {
 
       let sectionFinished = false;
       while (!sectionFinished) {
-        let state = await getBookControlState(input.bookId);
+        let control = await bookStep({ action: "control", input }) as { kind: "control"; state: string };
+        let state = control.state;
         while (state === "PAUSED") {
-          await markJob(input.jobId, "PAUSED", "사용자가 생성을 일시정지했습니다.", progressFrom(index, total));
+          await bookStep({ action: "mark", input, status: "PAUSED", message: "사용자가 생성을 일시정지했습니다.", progress: progressFrom(index, total) });
           await sleep("15s");
-          state = await getBookControlState(input.bookId);
+          control = await bookStep({ action: "control", input }) as { kind: "control"; state: string };
+          state = control.state;
         }
 
         if (state === "CANCELLED") {
-          await markJob(input.jobId, "CANCELLED", "사용자가 생성을 취소했습니다.", progressFrom(index, total));
+          await bookStep({ action: "mark", input, status: "CANCELLED", message: "사용자가 생성을 취소했습니다.", progress: progressFrom(index, total) });
           return { status: "cancelled" };
         }
 
-        const result = await generateSectionStep({ ...input, sectionId: section.id });
+        const result = await bookStep({ action: "section", input, sectionId: section.id }) as SectionResult;
         if (result.kind === "completed" || result.kind === "already-completed") {
           const progress = progressFrom(index + 1, total);
-          await markSectionProgress(input, section.id, index + 1, total, progress, result);
+          await bookStep({ action: "progress", input, sectionId: section.id, ordinal: index + 1, total, progress, result });
           sectionFinished = true;
           continue;
         }
 
         if (result.kind === "usage-limit") {
-          await markJob(
-            input.jobId,
-            "WAITING_LIMIT",
-            input.provider === "codex"
+          await bookStep({
+            action: "mark",
+            input,
+            status: "WAITING_LIMIT",
+            message: input.provider === "codex"
               ? "ChatGPT/Codex 사용 한도에 도달했습니다. 현재 Section 이전까지 저장되어 있으며 1시간 뒤 자동 확인합니다."
               : "OpenRouter 무료 일일 한도에 도달했습니다. 현재 Section 이전까지 저장되어 있으며 24시간 뒤 자동 재개합니다.",
-            progressFrom(index, total)
-          );
+            progress: progressFrom(index, total)
+          });
           await sleep(input.provider === "codex" ? "1h" : "24h");
-          await markJob(input.jobId, "GENERATING", `${providerLabel} 사용 한도 대기 후 자동으로 집필을 재개합니다.`, progressFrom(index, total));
+          await bookStep({ action: "mark", input, status: "GENERATING", message: `${providerLabel} 사용 한도 대기 후 자동으로 집필을 재개합니다.`, progress: progressFrom(index, total) });
           continue;
         }
 
         if (result.kind === "connection-expired") {
-          await markNeedsReconnect(input, progressFrom(index, total));
+          await bookStep({ action: "reconnect", input, progress: progressFrom(index, total) });
           return { status: "needs-reconnect" };
         }
 
-        await markTemporaryFailure(input, result.message, progressFrom(index, total));
+        await bookStep({ action: "temporary-failure", input, message: result.message, progress: progressFrom(index, total) });
         return { status: "paused-error", error: result.message };
       }
     }
 
-    const composed = await composePagesStep(input.bookId);
-    await finalizeBook(input, composed.pageCount);
+    const composed = await bookStep({ action: "compose", input }) as { kind: "composed"; pageCount: number };
+    await bookStep({ action: "finalize", input, pageCount: composed.pageCount });
     return { status: "completed", pageCount: composed.pageCount };
   } catch (error) {
-    await failWorkflow(input, error instanceof Error ? error.message : String(error));
+    const message = error instanceof Error ? error.message : String(error);
+    await bookStep({ action: "fail", input, message });
     throw error;
   }
 }
 
-async function getOutline(bookId: string) {
+async function bookStep(request: BookStepRequest): Promise<BookStepResult> {
   "use step";
+
+  switch (request.action) {
+    case "mark":
+      await markJob(request.input.jobId, request.status, request.message, request.progress);
+      return { kind: "ok" };
+    case "outline":
+      return { kind: "outline", sections: await getOutline(request.input.bookId) };
+    case "control":
+      return { kind: "control", state: await getBookControlState(request.input.bookId) };
+    case "section":
+      return generateSection(request.input, request.sectionId);
+    case "progress":
+      await markSectionProgress(request.input, request.sectionId, request.ordinal, request.total, request.progress, request.result);
+      return { kind: "ok" };
+    case "reconnect":
+      await markNeedsReconnect(request.input, request.progress);
+      return { kind: "ok" };
+    case "temporary-failure":
+      await markTemporaryFailure(request.input, request.message, request.progress);
+      return { kind: "ok" };
+    case "compose": {
+      const composed = await composeBookPages(request.input.bookId);
+      return { kind: "composed", pageCount: composed.pageCount };
+    }
+    case "finalize":
+      await finalizeBook(request.input, request.pageCount);
+      return { kind: "ok" };
+    case "fail":
+      await failWorkflow(request.input, request.message);
+      return { kind: "ok" };
+  }
+}
+
+async function getOutline(bookId: string) {
   const supabase = createServiceSupabase();
   const { data, error } = await supabase.from("sections")
     .select("id,position,status,chapter:chapters(position,part:parts(position))")
@@ -139,20 +197,18 @@ async function getOutline(bookId: string) {
 }
 
 async function getBookControlState(bookId: string) {
-  "use step";
   const supabase = createServiceSupabase();
   const { data, error } = await supabase.from("books").select("status").eq("id", bookId).single();
   if (error || !data) throw new FatalError(error?.message ?? "BOOK_NOT_FOUND");
   return data.status as string;
 }
 
-async function generateSectionStep(input: WorkflowInput & { sectionId: string }): Promise<SectionResult> {
-  "use step";
+async function generateSection(input: WorkflowInput, sectionId: string): Promise<SectionResult> {
   const supabase = createServiceSupabase();
 
   const { data: rawSection, error: sectionError } = await supabase.from("sections")
     .select("id,book_id,chapter_id,title,goal,target_words,status,chapter:chapters(id,title,goal,position),book:books!sections_book_id_fkey(id,user_id,title,subtitle,idea,reader_profiles(*),writing_styles(*),story_bibles(data),knowledge_maps(data))")
-    .eq("id", input.sectionId).single();
+    .eq("id", sectionId).single();
   if (sectionError || !rawSection) throw new FatalError(sectionError?.message ?? "SECTION_NOT_FOUND");
 
   const section = rawSection as unknown as SectionContext;
@@ -241,7 +297,6 @@ async function generateSectionStep(input: WorkflowInput & { sectionId: string })
 }
 
 async function markJob(jobId: string, status: string, message: string, progress: number) {
-  "use step";
   const supabase = createServiceSupabase();
   await Promise.all([
     supabase.from("generation_jobs").update({ status, progress, updated_at: new Date().toISOString() }).eq("id", jobId),
@@ -257,7 +312,6 @@ async function markSectionProgress(
   progress: number,
   result: Extract<SectionResult, { kind: "completed" | "already-completed" }>
 ) {
-  "use step";
   const supabase = createServiceSupabase();
   const message = result.kind === "completed"
     ? `백그라운드 Section ${ordinal}/${total} 완료: ${result.title} · ${backgroundProviderLabel(input.provider)}`
@@ -275,7 +329,6 @@ async function markSectionProgress(
 }
 
 async function markNeedsReconnect(input: WorkflowInput, progress: number) {
-  "use step";
   const supabase = createServiceSupabase();
   await Promise.all([
     supabase.from("books").update({ status: "PAUSED" }).eq("id", input.bookId),
@@ -285,7 +338,6 @@ async function markNeedsReconnect(input: WorkflowInput, progress: number) {
 }
 
 async function markTemporaryFailure(input: WorkflowInput, message: string, progress: number) {
-  "use step";
   const supabase = createServiceSupabase();
   await Promise.all([
     supabase.from("books").update({ status: "PAUSED" }).eq("id", input.bookId),
@@ -294,13 +346,7 @@ async function markTemporaryFailure(input: WorkflowInput, message: string, progr
   ]);
 }
 
-async function composePagesStep(bookId: string) {
-  "use step";
-  return composeBookPages(bookId);
-}
-
 async function finalizeBook(input: WorkflowInput, pageCount: number) {
-  "use step";
   const supabase = createServiceSupabase();
   await Promise.all([
     supabase.from("books").update({ status: "COMPLETED", progress: 100, current_section_id: null }).eq("id", input.bookId),
@@ -310,7 +356,6 @@ async function finalizeBook(input: WorkflowInput, pageCount: number) {
 }
 
 async function failWorkflow(input: WorkflowInput, message: string) {
-  "use step";
   const supabase = createServiceSupabase();
   await Promise.all([
     supabase.from("books").update({ status: "PAUSED" }).eq("id", input.bookId),
