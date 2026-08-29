@@ -16,17 +16,6 @@ import { collectBook, bookToMarkdown, stripMarkdown } from "@/lib/export/collect
 import { renderBookPdf } from "@/lib/export/pdf";
 import { renderBookEpub } from "@/lib/export/epub";
 import { renderBookDocx } from "@/lib/export/docx";
-import {
-  handleEditorGET,
-  handleEditorPATCH,
-  handleEditorPOST,
-  handleEditorDELETE
-} from "@/lib/api/editor-handlers";
-import {
-  handleAiConnectionGET,
-  handleAiConnectionPOST,
-  handleAiConnectionDELETE
-} from "@/lib/api/ai-connection-handlers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -498,8 +487,8 @@ async function handleExport(bookId: string, format: string) {
 
 export async function GET(request: Request, { params }: { params: Promise<{ path: string[] }> }) {
   const path = await pathOf(params);
-  if (path[0] === "editor") return handleEditorGET(request, path.slice(1));
-  if (path[0] === "auth" && path[1] === "ai-connection") return handleAiConnectionGET(request);
+  if (path[0] === "editor") { const { handleEditorGET } = await import("@/lib/api/editor-handlers"); return handleEditorGET(request, path.slice(1)); }
+  if (path[0] === "auth" && path[1] === "ai-connection") { const { handleAiConnectionGET } = await import("@/lib/api/ai-connection-handlers"); return handleAiConnectionGET(request); }
   if (path[0] === "health" && path[1] === "service-bridge") return handleHealth();
   if (path[0] === "books" && path[2] === "export" && path[3]) return handleExport(path[1], path[3]);
   return bad("Unknown core route", 404);
@@ -507,12 +496,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ path
 
 export async function POST(request: Request, { params }: { params: Promise<{ path: string[] }> }) {
   const path = await pathOf(params);
-  if (path[0] === "editor") return handleEditorPOST(request, path.slice(1));
+  if (path[0] === "editor") { const { handleEditorPOST } = await import("@/lib/api/editor-handlers"); return handleEditorPOST(request, path.slice(1)); }
   if (path[0] === "internal" && path[1] === "codex" && path[2] === "generate") {
     const { handleCodexGenerationBridge } = await import("@/lib/ai/codex-internal");
     return handleCodexGenerationBridge(request);
   }
-  if (path[0] === "auth" && path[1] === "ai-connection") return handleAiConnectionPOST(request);
+  if (path[0] === "auth" && path[1] === "ai-connection") { const { handleAiConnectionPOST } = await import("@/lib/api/ai-connection-handlers"); return handleAiConnectionPOST(request); }
   if (path[0] === "auth" && path[1] === "register") return handleRegister(request);
   if (path[0] === "auth" && path[1] === "openrouter-exchange") return handleOpenRouterExchange(request);
   if (path.length === 1 && path[0] === "books") return handleCreateBook(request);
@@ -523,13 +512,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ pat
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ path: string[] }> }) {
   const path = await pathOf(params);
-  if (path[0] === "editor") return handleEditorPATCH(request, path.slice(1));
+  if (path[0] === "editor") { const { handleEditorPATCH } = await import("@/lib/api/editor-handlers"); return handleEditorPATCH(request, path.slice(1)); }
   return bad("Unknown core route", 404);
 }
 
 export async function DELETE(request: Request, { params }: { params: Promise<{ path: string[] }> }) {
   const path = await pathOf(params);
-  if (path[0] === "editor") return handleEditorDELETE(request, path.slice(1));
-  if (path[0] === "auth" && path[1] === "ai-connection") return handleAiConnectionDELETE(request);
+  if (path[0] === "editor") { const { handleEditorDELETE } = await import("@/lib/api/editor-handlers"); return handleEditorDELETE(request, path.slice(1)); }
+  if (path[0] === "auth" && path[1] === "ai-connection") { const { handleAiConnectionDELETE } = await import("@/lib/api/ai-connection-handlers"); return handleAiConnectionDELETE(request); }
   return bad("Unknown core route", 404);
 }
