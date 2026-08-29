@@ -2,7 +2,7 @@ import http from "node:http";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import readline from "node:readline";
 
@@ -139,13 +139,14 @@ const rateWindows = new Map();
 async function withUserLock(userId, task) {
   const previous = locks.get(userId) ?? Promise.resolve();
   let release;
-  const next = new Promise((resolve) => { release = resolve; });
-  locks.set(userId, previous.then(() => next));
+  const barrier = new Promise((resolve) => { release = resolve; });
+  const queued = previous.then(() => barrier);
+  locks.set(userId, queued);
   await previous;
   try { return await task(); }
   finally {
     release();
-    if (locks.get(userId) === next) locks.delete(userId);
+    if (locks.get(userId) === queued) locks.delete(userId);
   }
 }
 
@@ -303,6 +304,7 @@ async function generate(userId, input) {
     let text = "";
     let tokenUsage = { inputTokens: 0, outputTokens: 0 };
     let terminal = null;
+    let timeoutHandle = null;
     const terminalPromise = new Promise((resolve) => { terminal = resolve; });
     const unsubscribe = session.client.subscribe((message) => {
       const params = message.params ?? {};
@@ -325,7 +327,9 @@ async function generate(userId, input) {
       turnId = turnResult?.turn?.id;
       if (!turnId) throw new Error("CODEX_TURN_START_FAILED");
       const timeoutMs = Math.min(Math.max(Number(input.timeoutMs ?? 240000), 10000), 600000);
-      const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("CODEX_GENERATION_TIMEOUT")), timeoutMs));
+      const timeout = new Promise((_, reject) => {
+        timeoutHandle = setTimeout(() => reject(new Error("CODEX_GENERATION_TIMEOUT")), timeoutMs);
+      });
       const completed = await Promise.race([terminalPromise, timeout]);
       if (!completed?.ok) {
         const errorText = JSON.stringify(completed?.params?.turn?.error ?? "");
@@ -351,6 +355,7 @@ async function generate(userId, input) {
         }
       };
     } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
       unsubscribe();
     }
   });
