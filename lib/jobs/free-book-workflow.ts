@@ -96,7 +96,7 @@ export async function generateFreeBookWorkflow(input: WorkflowInput) {
         let state = control.state;
         while (state === "PAUSED") {
           await bookStep({ action: "mark", input, status: "PAUSED", message: "사용자가 생성을 일시정지했습니다.", progress: progressFrom(index, total) });
-          await sleep("15s");
+          await workflowWait("15s");
           control = await bookStep({ action: "control", input }) as { kind: "control"; state: string };
           state = control.state;
         }
@@ -124,7 +124,7 @@ export async function generateFreeBookWorkflow(input: WorkflowInput) {
               : "OpenRouter 무료 일일 한도에 도달했습니다. 현재 Section 이전까지 저장되어 있으며 24시간 뒤 자동 재개합니다.",
             progress: progressFrom(index, total)
           });
-          await sleep(input.provider === "codex" ? "1h" : "24h");
+          await workflowWait(input.provider === "codex" ? "1h" : "24h");
           await bookStep({ action: "mark", input, status: "GENERATING", message: `${providerLabel} 사용 한도 대기 후 자동으로 집필을 재개합니다.`, progress: progressFrom(index, total) });
           continue;
         }
@@ -147,6 +147,10 @@ export async function generateFreeBookWorkflow(input: WorkflowInput) {
     await bookStep({ action: "fail", input, message });
     throw error;
   }
+}
+
+async function workflowWait(duration: string) {
+  await sleep(duration);
 }
 
 async function bookStep(request: BookStepRequest): Promise<BookStepResult> {
