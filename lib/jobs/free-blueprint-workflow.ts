@@ -90,7 +90,7 @@ export async function generateFreeBlueprintWorkflow(input: WorkflowInput) {
       }
       if (result.kind === "usage-limit") {
         await blueprintStep({ action: "mark", input, status: "WAITING_LIMIT", progress: 12, message: limitMessage(provider, "Book Blueprint 책 구조 설계") });
-        await sleep(limitWait(provider));
+        await workflowWait(limitWait(provider));
         await blueprintStep({ action: "mark", input, status: "PLANNING", progress: 14, message: `${providerLabel} 사용 한도 대기 후 저장된 단계에서 자동 재개합니다.` });
         continue;
       }
@@ -101,7 +101,7 @@ export async function generateFreeBlueprintWorkflow(input: WorkflowInput) {
       if (skeletonRetries < 1) {
         skeletonRetries += 1;
         await blueprintStep({ action: "mark", input, status: "RETRYING", progress: 12, message: "책 구조 응답 형식이 불완전해 2분 뒤 작은 요청으로 한 번 더 시도합니다." });
-        await sleep("2m");
+        await workflowWait("2m");
         continue;
       }
       await blueprintStep({ action: "fail", input, message: result.message });
@@ -143,7 +143,7 @@ export async function generateFreeBlueprintWorkflow(input: WorkflowInput) {
           if (result.kind === "usage-limit") {
             const progress = planningProgress(completedChapters, totalChapters);
             await blueprintStep({ action: "mark", input, status: "WAITING_LIMIT", progress, message: limitMessage(provider, `Chapter ${completedChapters + 1}/${totalChapters} 설계`) });
-            await sleep(limitWait(provider));
+            await workflowWait(limitWait(provider));
             await blueprintStep({ action: "mark", input, status: "PLANNING", progress, message: `${providerLabel} 사용 한도 대기 후 다음 Chapter 설계를 재개합니다.` });
             continue;
           }
@@ -154,7 +154,7 @@ export async function generateFreeBlueprintWorkflow(input: WorkflowInput) {
           if (chapterRetries < 1) {
             chapterRetries += 1;
             await blueprintStep({ action: "mark", input, status: "RETRYING", progress: planningProgress(completedChapters, totalChapters), message: `Chapter ${completedChapters + 1}/${totalChapters} 응답이 불완전해 2분 뒤 해당 Chapter만 다시 시도합니다.` });
-            await sleep("2m");
+            await workflowWait("2m");
             continue;
           }
           await blueprintStep({ action: "fail", input, message: result.message });
@@ -183,6 +183,10 @@ export async function generateFreeBlueprintWorkflow(input: WorkflowInput) {
     await blueprintStep({ action: "fail", input, message });
     throw error;
   }
+}
+
+async function workflowWait(duration: string) {
+  await sleep(duration);
 }
 
 function providerOf(input: WorkflowInput) {
