@@ -1,6 +1,7 @@
 import type { LlmProvider, StructuredRequest, StructuredResponse } from "./provider";
 
 type OpenRouterContentPart = { type?: string; text?: string | null };
+type OpenRouterError = { message?: string; code?: string | number };
 type OpenRouterMessage = {
   content?: string | OpenRouterContentPart[] | null;
   refusal?: string | null;
@@ -8,28 +9,40 @@ type OpenRouterMessage = {
 type OpenRouterChoice = {
   message?: OpenRouterMessage;
   finish_reason?: string | null;
+  error?: OpenRouterError;
 };
 type OpenRouterPayload = {
   id?: string;
   model?: string;
   choices?: OpenRouterChoice[];
   usage?: { prompt_tokens?: number; completion_tokens?: number };
-  error?: { message?: string; code?: string | number };
+  error?: OpenRouterError;
+  openrouter_metadata?: unknown;
 };
 
+type AttemptMode = "schema" | "json" | "plain";
+type AttemptPlan = { model: string; mode: AttemptMode };
 type FailedAttempt = {
   model: string;
+  mode: AttemptMode;
   kind: "http" | "empty" | "json" | "schema" | "provider";
   status?: number;
   finishReason?: string | null;
   requestId?: string;
+  providerError?: string;
 };
 
 export const OPENROUTER_FREE_MODEL = "openrouter/free";
-export const OPENROUTER_FREE_MODELS = [
-  "openai/gpt-oss-120b:free",
-  "openai/gpt-oss-20b:free",
-  OPENROUTER_FREE_MODEL
+
+// Do not pin free provider model IDs here. Free endpoints and provider capability
+// combinations change frequently. The free router is designed to select from the
+// currently available zero-cost models, so we retry it while progressively
+// relaxing output-format requirements and validate the result locally.
+export const OPENROUTER_FREE_ATTEMPTS: readonly AttemptPlan[] = [
+  { model: OPENROUTER_FREE_MODEL, mode: "schema" },
+  { model: OPENROUTER_FREE_MODEL, mode: "schema" },
+  { model: OPENROUTER_FREE_MODEL, mode: "json" },
+  { model: OPENROUTER_FREE_MODEL, mode: "plain" }
 ] as const;
 
 export function normalizeOpenRouterContent(content: OpenRouterMessage["content"]): string {
@@ -69,8 +82,57 @@ function outputBudget(schemaName: string) {
   return 7000;
 }
 
+function safeProviderError(message: string | undefined) {
+  if (!message) return undefined;
+  return message.replace(/[\r\n\t]+/g, " ").slice(0, 220);
+}
+
+function isRateLimited(message: string | undefined, status?: number) {
+  return status === 429 || /rate limit|quota|daily limit|free.*limit/i.test(message ?? "");
+}
+
 function logFailedAttempt(attempt: FailedAttempt) {
   console.warn("[free-ai] OpenRouter attempt failed", attempt);
+}
+
+function jsonOnlyInstruction<T>(request: StructuredRequest<T>) {
+  return [
+    request.system,
+    "Return only one valid JSON value. Do not use Markdown fences or explanatory text.",
+    "The JSON must satisfy this schema exactly:",
+    JSON.stringify(request.jsonSchema)
+  ].join("\n\n");
+}
+
+function buildRequestBody<T>(request: StructuredRequest<T>, attempt: AttemptPlan) {
+  const body: Record<string, unknown> = {
+    model: attempt.model,
+    messages: [
+      { role: "system", content: attempt.mode === "schema" ? request.system : jsonOnlyInstruction(request) },
+      { role: "user", content: request.prompt }
+    ],
+    provider: { allow_fallbacks: true },
+    max_tokens: outputBudget(request.schemaName),
+    stream: false,
+    usage: { include: true }
+  };
+
+  if (attempt.mode === "schema") {
+    body.response_format = {
+      type: "json_schema",
+      json_schema: {
+        name: request.schemaName,
+        strict: true,
+        schema: request.jsonSchema
+      }
+    };
+    body.plugins = [{ id: "response-healing" }];
+  } else if (attempt.mode === "json") {
+    body.response_format = { type: "json_object" };
+    body.plugins = [{ id: "response-healing" }];
+  }
+
+  return body;
 }
 
 export class OpenRouterFreeProvider implements LlmProvider {
@@ -83,7 +145,7 @@ export class OpenRouterFreeProvider implements LlmProvider {
     let rateLimitedAttempts = 0;
     let lastFailure = "FREE_AI_TEMPORARILY_UNAVAILABLE";
 
-    for (const model of OPENROUTER_FREE_MODELS) {
+    for (const attempt of OPENROUTER_FREE_ATTEMPTS) {
       let response: Response;
       try {
         response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -95,32 +157,13 @@ export class OpenRouterFreeProvider implements LlmProvider {
             "x-title": "AI Book Studio",
             "x-openrouter-metadata": "enabled"
           },
-          body: JSON.stringify({
-            model,
-            messages: [
-              { role: "system", content: request.system },
-              { role: "user", content: request.prompt }
-            ],
-            response_format: {
-              type: "json_schema",
-              json_schema: {
-                name: request.schemaName,
-                strict: true,
-                schema: request.jsonSchema
-              }
-            },
-            plugins: [{ id: "response-healing" }],
-            provider: { require_parameters: true, allow_fallbacks: true },
-            max_tokens: outputBudget(request.schemaName),
-            stream: false,
-            usage: { include: true }
-          }),
+          body: JSON.stringify(buildRequestBody(request, attempt)),
           signal: request.signal
         });
       } catch (error) {
         if (request.signal?.aborted) throw error;
         lastFailure = "FREE_AI_TEMPORARILY_UNAVAILABLE";
-        logFailedAttempt({ model, kind: "provider" });
+        logFailedAttempt({ model: attempt.model, mode: attempt.mode, kind: "provider" });
         continue;
       }
 
@@ -131,29 +174,41 @@ export class OpenRouterFreeProvider implements LlmProvider {
         raw = rawText ? JSON.parse(rawText) as OpenRouterPayload : {};
       } catch {
         lastFailure = "FREE_AI_INVALID_PROVIDER_RESPONSE";
-        logFailedAttempt({ model, kind: "provider", status: response.status, requestId });
+        logFailedAttempt({ model: attempt.model, mode: attempt.mode, kind: "provider", status: response.status, requestId });
         continue;
       }
 
+      const choice = raw.choices?.[0];
+      const providerError = safeProviderError(choice?.error?.message ?? raw.error?.message);
+
       if (!response.ok) {
-        const message = raw.error?.message ?? `OpenRouter error ${response.status}`;
         if (response.status === 401 || response.status === 403) throw new Error("FREE_AI_CONNECTION_EXPIRED");
-        const rateLimited = response.status === 429 || /rate limit|quota|daily limit/i.test(message);
-        if (rateLimited) {
+        if (isRateLimited(providerError, response.status)) {
           rateLimitedAttempts += 1;
           lastFailure = "FREE_AI_DAILY_LIMIT";
         } else {
           lastFailure = "FREE_AI_TEMPORARILY_UNAVAILABLE";
         }
-        logFailedAttempt({ model, kind: "http", status: response.status, requestId });
+        logFailedAttempt({ model: attempt.model, mode: attempt.mode, kind: "http", status: response.status, requestId, providerError });
         continue;
       }
 
-      const choice = raw.choices?.[0];
       const content = normalizeOpenRouterContent(choice?.message?.content);
       if (!content) {
-        lastFailure = choice?.finish_reason === "length" ? "FREE_AI_TRUNCATED_RESPONSE" : "FREE_AI_EMPTY_RESPONSE";
-        logFailedAttempt({ model, kind: "empty", finishReason: choice?.finish_reason, requestId });
+        if (isRateLimited(providerError)) {
+          rateLimitedAttempts += 1;
+          lastFailure = "FREE_AI_DAILY_LIMIT";
+        } else {
+          lastFailure = choice?.finish_reason === "length" ? "FREE_AI_TRUNCATED_RESPONSE" : "FREE_AI_TEMPORARILY_UNAVAILABLE";
+        }
+        logFailedAttempt({
+          model: attempt.model,
+          mode: attempt.mode,
+          kind: "empty",
+          finishReason: choice?.finish_reason,
+          requestId,
+          providerError
+        });
         continue;
       }
 
@@ -162,7 +217,7 @@ export class OpenRouterFreeProvider implements LlmProvider {
         parsed = parseOpenRouterJson(content);
       } catch {
         lastFailure = "FREE_AI_INVALID_JSON";
-        logFailedAttempt({ model, kind: "json", finishReason: choice?.finish_reason, requestId });
+        logFailedAttempt({ model: attempt.model, mode: attempt.mode, kind: "json", finishReason: choice?.finish_reason, requestId, providerError });
         continue;
       }
 
@@ -171,7 +226,7 @@ export class OpenRouterFreeProvider implements LlmProvider {
         value = request.parse(parsed);
       } catch {
         lastFailure = "FREE_AI_SCHEMA_MISMATCH";
-        logFailedAttempt({ model, kind: "schema", finishReason: choice?.finish_reason, requestId });
+        logFailedAttempt({ model: attempt.model, mode: attempt.mode, kind: "schema", finishReason: choice?.finish_reason, requestId, providerError });
         continue;
       }
 
@@ -181,14 +236,14 @@ export class OpenRouterFreeProvider implements LlmProvider {
           inputTokens: raw.usage?.prompt_tokens ?? 0,
           outputTokens: raw.usage?.completion_tokens ?? 0,
           durationMs: Date.now() - started,
-          model: raw.model ?? model,
+          model: raw.model ?? attempt.model,
           requestId: requestId ?? raw.id
         },
         raw
       };
     }
 
-    if (rateLimitedAttempts === OPENROUTER_FREE_MODELS.length) throw new Error("FREE_AI_DAILY_LIMIT");
+    if (rateLimitedAttempts === OPENROUTER_FREE_ATTEMPTS.length) throw new Error("FREE_AI_DAILY_LIMIT");
     throw new Error(lastFailure === "FREE_AI_DAILY_LIMIT" ? "FREE_AI_TEMPORARILY_UNAVAILABLE" : lastFailure);
   }
 
