@@ -1,0 +1,52 @@
+name: One-time remove Codex probe
+
+on:
+  push:
+    paths:
+      - '.github/workflows/one-time-remove-codex-probe.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Remove temporary production probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          sandbox = Path('lib/ai/codex-sandbox.ts')
+          s = sandbox.read_text()
+          marker = '\nexport async function probeCodexSandbox() {'
+          if marker in s:
+              s = s.split(marker, 1)[0].rstrip() + '\n'
+          sandbox.write_text(s)
+
+          route = Path('app/api/core/[...path]/route.ts')
+          r = route.read_text()
+          r = r.replace('import { probeCodexSandbox } from "@/lib/ai/codex-sandbox";\n', '')
+          start = r.find('async function handleCodexSandboxProbe() {')
+          end = r.find('async function handleHealth() {')
+          if start != -1 and end != -1 and start < end:
+              r = r[:start] + r[end:]
+          r = r.replace('  if (path[0] === "health" && path[1] === "codex-sandbox-probe-72f46d0e") return handleCodexSandboxProbe();\n', '')
+          route.write_text(r)
+
+          proxy = Path('proxy.ts')
+          p = proxy.read_text().replace(' || pathname === "/api/health/codex-sandbox-probe-72f46d0e"', '')
+          proxy.write_text(p)
+
+          config = Path('next.config.ts')
+          n = config.read_text().replace('      { source: "/api/health/codex-sandbox-probe-72f46d0e", destination: "/api/core/health/codex-sandbox-probe-72f46d0e" },\n', '')
+          config.write_text(n)
+          PY
+          git config user.name "AI Book Studio Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: remove temporary Codex Sandbox probe"
+          git push origin HEAD:main
