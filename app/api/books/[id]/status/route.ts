@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabase/server";
+import { normalizeBackgroundProvider } from "@/lib/ai/background-provider";
 
 type Relation<T> = T | T[] | null;
 type SectionProgressRow = {
@@ -10,6 +11,7 @@ type SectionProgressRow = {
   target_words: number;
   chapter: Relation<{ title: string }>;
 };
+type BookSettingsRow = { planning_input?: { aiProvider?: unknown } | null };
 
 function one<T>(value: Relation<T>): T | null {
   return Array.isArray(value) ? (value[0] ?? null) : value;
@@ -20,7 +22,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
   try {
     const { supabase } = await requireUser();
     const [{ data: book, error }, { data: jobs }, { data: logs }, { data: rawSections, error: sectionsError }] = await Promise.all([
-      supabase.from("books").select("id,status,progress,current_section_id,quality_score,quality_scores").eq("id", id).single(),
+      supabase.from("books").select("id,status,progress,current_section_id,quality_score,quality_scores,book_settings(planning_input)").eq("id", id).single(),
       supabase.from("generation_jobs").select("id,status,progress,workflow_run_id,created_at,updated_at").eq("book_id", id).order("created_at", { ascending: false }).limit(1),
       supabase.from("job_logs").select("id,level,message,metadata,created_at,generation_job_id").eq("book_id", id).order("created_at", { ascending: false }).limit(30),
       supabase.from("sections").select("id,title,status,word_count,target_words,chapter:chapters(title)").eq("book_id", id)
@@ -43,8 +45,14 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
         ? Math.max(Number(book.progress ?? 0), planningProgress)
         : Math.max(Number(book.progress ?? 0), calculatedProgress);
 
+    const settingsRelation = book.book_settings as unknown as Relation<BookSettingsRow>;
+    const provider = normalizeBackgroundProvider(one(settingsRelation)?.planning_input?.aiProvider);
+    const { book_settings: _settings, ...bookPayload } = book;
+
     return NextResponse.json({
-      book: { ...book, progress: effectiveProgress },
+      book: { ...bookPayload, progress: effectiveProgress },
+      aiProvider: provider,
+      aiModel: provider === "codex" ? "gpt-5.6-luna" : "openrouter/free",
       progressDetails: {
         completedSections,
         totalSections,
