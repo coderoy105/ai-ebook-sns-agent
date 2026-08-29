@@ -44,11 +44,13 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
   },[book.id]);
 
   useEffect(()=>{
-    setFreeConnected(Boolean(getFreeAiKey()));
+    const connectionTimer=setTimeout(()=>setFreeConnected(Boolean(getFreeAiKey())),0);
     const initialTimer=setTimeout(()=>{void refreshStatus();},0);
-    if(!["GENERATING","REVIEWING","PAUSED","PLANNING"].includes(status.status)) return()=>clearTimeout(initialTimer);
+    if(!["GENERATING","REVIEWING","PAUSED","PLANNING"].includes(status.status)) {
+      return()=>{clearTimeout(connectionTimer);clearTimeout(initialTimer);};
+    }
     const timer=setInterval(()=>{void refreshStatus();},5000);
-    return()=>{clearTimeout(initialTimer);clearInterval(timer);};
+    return()=>{clearTimeout(connectionTimer);clearTimeout(initialTimer);clearInterval(timer);};
   },[refreshStatus,status.status]);
 
   function selectSection(section:Section) {
@@ -174,9 +176,9 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
       <p className="muted" style={{fontSize:12}}>{freeConnected?"OpenRouter 무료 AI 연결됨 · 생성 비용 0원":"무료 AI 연결 후 집필을 시작할 수 있습니다."}</p>
       <div className="actions">
         {!freeConnected&&<button className="button" onClick={connectFreeAi}>무료 AI 연결</button>}
-        {freeConnected&&status.status!=="COMPLETED"&&!busy&&<button className="button" onClick={startGeneration}>{status.progress>0?"무료 이어서 생성":"무료로 책 생성"}</button>}
+        {freeConnected&&status.status!=="COMPLETED"&&status.status!=="PAUSED"&&!busy&&<button className="button" onClick={startGeneration}>{status.progress>0?"무료 이어서 생성":"무료로 책 생성"}</button>}
         {busy&&<button className="button secondary" onClick={()=>control("pause")}>현재 Section 후 일시정지</button>}
-        {status.status==="PAUSED"&&!busy&&<button className="button secondary" onClick={startGeneration}>무료 이어서 생성</button>}
+        {freeConnected&&status.status==="PAUSED"&&!busy&&<button className="button secondary" onClick={startGeneration}>무료 이어서 생성</button>}
         {["GENERATING","PAUSED"].includes(status.status)&&<button className="button ghost" onClick={()=>control("cancel")}>Cancel</button>}
       </div>
 
