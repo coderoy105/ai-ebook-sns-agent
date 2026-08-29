@@ -1,0 +1,63 @@
+/* Keep live generation useful without recreating the old oversized black console. */
+@media (max-width: 900px) {
+  .manuscript-editor-shell + .generation-dock {
+    width: calc(100vw - 20px);
+    bottom: calc(76px + env(safe-area-inset-bottom));
+    color: var(--ink);
+    background: rgba(252, 252, 250, 0.97);
+    border: 1px solid var(--line-strong);
+    border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(24, 26, 21, 0.13);
+    backdrop-filter: blur(18px);
+  }
+
+  .manuscript-editor-shell + .generation-dock .dock-main {
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 10px;
+    min-height: 54px;
+    padding: 8px 12px;
+  }
+
+  .manuscript-editor-shell + .generation-dock .dock-progress-number {
+    border-right: 1px solid var(--line);
+    padding-right: 9px;
+  }
+
+  .manuscript-editor-shell + .generation-dock .dock-progress-number strong {
+    color: var(--ink);
+    font-size: 23px;
+  }
+
+  .manuscript-editor-shell + .generation-dock .dock-progress-number span {
+    color: var(--muted);
+    font-size: 9px;
+  }
+
+  .manuscript-editor-shell + .generation-dock .dock-copy strong {
+    color: var(--ink);
+    font-size: 10px;
+  }
+
+  .manuscript-editor-shell + .generation-dock .dock-copy span {
+    color: var(--muted);
+    margin-top: 2px;
+    font-size: 8px;
+  }
+
+  .manuscript-editor-shell + .generation-dock .dock-current {
+    display: none;
+  }
+
+  .manuscript-editor-shell + .generation-dock .dock-track {
+    height: 2px;
+    background: #e3e5df;
+  }
+
+  .manuscript-editor-shell + .generation-dock .dock-track span {
+    background: var(--accent);
+  }
+
+  .manuscript-editor-shell + .generation-dock.dock-completed .dock-track span {
+    background: var(--success);
+  }
+}
