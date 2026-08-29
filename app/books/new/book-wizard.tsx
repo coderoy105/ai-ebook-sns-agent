@@ -358,7 +358,7 @@ export function BookWizard() {
           <span className="status-dot" aria-hidden="true" />
           <div>
             <strong>{selectedConnected ? `${selectedLabel} 연결됨` : `${selectedLabel} 연결 필요`}</strong>
-            <small>{form.aiProvider === "codex" ? (codexWorkerAvailable === false ? "Codex Worker 미연결 · 현재 선택 불가" : `${codexPlanType ?? "ChatGPT"} · Codex OAuth · Worker CODEX_HOME`) : "OpenRouter · 서버 Vault"}</small>
+            <small>{form.aiProvider === "codex" ? (codexWorkerAvailable === false ? "ChatGPT 연결을 준비할 수 없습니다." : `${codexPlanType ?? "ChatGPT"} · 계정 연결`) : "OpenRouter · 서버 Vault"}</small>
           </div>
         </div>
       </aside>
@@ -369,7 +369,7 @@ export function BookWizard() {
           {form.aiProvider === "codex" ? (
             codexConnected
               ? <button className="button secondary compact" disabled={loading || codexConnecting} onClick={disconnectCodex}>ChatGPT 연결 해제</button>
-              : <button className="button button-primary compact" disabled={loading || codexConnecting || codexWorkerAvailable === false} onClick={connectCodex}>{codexWorkerAvailable === false ? "Codex Worker 준비 중" : codexConnecting ? "ChatGPT 로그인 대기 중…" : "ChatGPT Plus 연결"}</button>
+              : <button className="button button-primary compact" disabled={loading || codexConnecting || codexWorkerAvailable === false} onClick={connectCodex}>{codexWorkerAvailable === false ? "연결 준비 중" : codexConnecting ? "OpenAI 로그인 완료를 기다리는 중…" : "ChatGPT로 계속하기"}</button>
           ) : (
             freeConnected
               ? <button className="button secondary compact" disabled={loading} onClick={disconnectFreeAi}>무료 AI 연결 해제</button>
@@ -443,11 +443,11 @@ export function BookWizard() {
 
           {step === 6 && (
             <div className="wizard-section review-section">
-              <p className="wizard-lead">책을 만들 AI를 선택합니다. GPT-5.6 Luna는 API 키가 아니라 ChatGPT/Codex OAuth를 사용하고, OpenRouter Free는 기존 무료 fallback입니다.</p>
+              <p className="wizard-lead">책을 만들 AI를 선택합니다. GPT-5.6 Luna는 ChatGPT 계정을 연결해 사용하며, OpenRouter Free는 무료 대안으로 사용할 수 있습니다.</p>
               <div className="choice-grid">
                 <button disabled={codexWorkerAvailable === false} className={`choice-tile ${form.aiProvider === "codex" ? "active" : ""}`} onClick={() => update("aiProvider", "codex")}>
                   <strong>GPT-5.6 Luna · ChatGPT Plus</strong>
-                  <span>{codexWorkerAvailable === false ? "Codex Worker 연결 후 사용 가능" : codexConnected ? `${codexPlanType ?? "ChatGPT"} 연결됨` : "API 키 불필요 · Codex OAuth"}</span>
+                  <span>{codexWorkerAvailable === false ? "현재 연결 준비 중" : codexConnected ? `${codexPlanType ?? "ChatGPT"} 연결됨` : "Google 로그인 가능 · ChatGPT 계정 사용"}</span>
                 </button>
                 <button className={`choice-tile ${form.aiProvider === "openrouter" ? "active" : ""}`} onClick={() => update("aiProvider", "openrouter")}>
                   <strong>OpenRouter Free</strong>
@@ -458,24 +458,27 @@ export function BookWizard() {
               {form.aiProvider === "codex" && !codexConnected && (
                 <div className="research-note">
                   <strong>ChatGPT Plus 연결</strong>
-                  <p>{codexWorkerAvailable === false ? "현재 지속 실행 Codex Worker가 연결되지 않아 ChatGPT Plus 로그인을 시작할 수 없습니다. OpenRouter Free는 바로 사용할 수 있습니다." : "버튼을 누르면 OpenAI의 Codex 기기 로그인 페이지가 새 탭으로 열립니다. 인증정보는 브라우저나 Supabase에 저장하지 않고 사용자별 Worker CODEX_HOME에서 관리합니다."}</p>
-                  <button className="button button-primary compact" disabled={codexConnecting || codexWorkerAvailable === false} onClick={connectCodex}>{codexWorkerAvailable === false ? "Codex Worker 준비 중" : codexConnecting ? "로그인 완료를 기다리는 중…" : "ChatGPT Plus 연결"}</button>
+                  <p>{codexWorkerAvailable === false ? "현재 ChatGPT 연결 기능을 준비할 수 없습니다. 잠시 후 다시 시도하거나 OpenRouter Free를 사용할 수 있습니다." : "버튼을 누르면 OpenAI 공식 로그인 페이지가 열립니다. Google 계정을 선택해 로그인할 수 있으며, 별도의 터미널이나 CLI 입력은 필요하지 않습니다. 로그인 완료는 이 화면에서 자동으로 확인합니다."}</p>
+                  <button className="button button-primary compact" disabled={codexConnecting || codexWorkerAvailable === false} onClick={connectCodex}>{codexWorkerAvailable === false ? "연결 준비 중" : codexConnecting ? "OpenAI 로그인 완료를 기다리는 중…" : "ChatGPT로 계속하기"}</button>
                 </div>
               )}
 
               {devicePrompt && (
                 <div className="research-note" aria-live="polite">
-                  <strong>새 탭에서 이 코드를 입력하세요: {devicePrompt.userCode}</strong>
-                  <p>로그인 탭을 닫았으면 아래 버튼으로 다시 열 수 있습니다. 이 화면은 로그인 완료를 기다리고 있습니다.</p>
-                  <a className="button secondary compact" href={devicePrompt.verificationUrl} target="_blank" rel="noreferrer">OpenAI 로그인 페이지 열기</a>
-                  <button className="button secondary compact" onClick={() => void navigator.clipboard?.writeText(devicePrompt.userCode)}>코드 복사</button>
+                  <strong>OpenAI에서 로그인을 완료해 주세요</strong>
+                  <p>Google 계정으로 로그인할 수 있습니다. OpenAI가 인증 코드를 요청하면 이미 클립보드에 복사된 코드를 붙여넣으면 됩니다. 완료되면 이 화면이 자동으로 연결 상태를 확인합니다.</p>
+                  <div className="panel-actions">
+                    <a className="button button-primary compact" href={devicePrompt.verificationUrl} target="_blank" rel="noreferrer">OpenAI 로그인 계속하기</a>
+                    <button className="button secondary compact" onClick={() => void navigator.clipboard?.writeText(devicePrompt.userCode)}>인증 코드 다시 복사</button>
+                  </div>
+                  <small>코드가 자동으로 복사되지 않았다면: {devicePrompt.userCode}</small>
                 </div>
               )}
 
               {form.aiProvider === "codex" && codexConnected && (
                 <div className="research-note">
                   <strong>GPT-5.6 Luna 준비됨</strong>
-                  <p>{codexPlanType ? `ChatGPT 플랜: ${codexPlanType} · ` : ""}{codexModelAvailable === false ? "이 계정에서는 Luna 모델이 보이지 않습니다." : "Codex OAuth가 사용자별 Worker CODEX_HOME에 연결되어 있습니다. ChatGPT/Codex 사용 한도를 사용합니다."}</p>
+                  <p>{codexPlanType ? `ChatGPT 플랜: ${codexPlanType} · ` : ""}{codexModelAvailable === false ? "이 계정에서는 Luna 모델이 보이지 않습니다." : "ChatGPT 계정 연결이 완료되었습니다. 생성에는 해당 ChatGPT 계정의 사용 한도가 적용됩니다."}</p>
                 </div>
               )}
 

@@ -77,21 +77,21 @@ export function CodexUsageStatus() {
         <span className="status-dot" aria-hidden="true" />
         <div>
           <strong>GPT-5.6 Luna</strong>
-          <small>{prettyPlan(status.planType)} · Codex OAuth</small>
+          <small>{prettyPlan(status.planType)} · 계정 연결</small>
         </div>
       </div>
       <div className="codex-usage-copy">
         <strong>{modelUnavailable ? "현재 계정에서 Luna를 사용할 수 없습니다." : "ChatGPT 연결됨"}</strong>
         <span>{modelUnavailable
-          ? "Codex model/list에서 GPT-5.6 Luna가 확인되지 않았습니다."
+          ? "현재 ChatGPT 계정에서 GPT-5.6 Luna를 사용할 수 없습니다."
           : primaryUsed == null
             ? "연결은 정상이며 현재 계정은 사용량 퍼센트를 제공하지 않았습니다."
-            : `Codex 사용량 ${primaryUsed}%${reset ? ` · 초기화 ${reset}` : ""}${secondaryUsed == null ? "" : ` · 보조 한도 ${secondaryUsed}%`}`}</span>
+            : `ChatGPT 사용량 ${primaryUsed}%${reset ? ` · 초기화 ${reset}` : ""}${secondaryUsed == null ? "" : ` · 보조 한도 ${secondaryUsed}%`}`}</span>
       </div>
       {primaryUsed != null && !modelUnavailable ? (
         <div className="codex-usage-meter">
           <span>{primaryUsed}%</span>
-          <div className="progress-track" aria-label={`Codex 사용량 ${primaryUsed}%`}><i style={{ width: `${primaryUsed}%` }} /></div>
+          <div className="progress-track" aria-label={`ChatGPT 사용량 ${primaryUsed}%`}><i style={{ width: `${primaryUsed}%` }} /></div>
         </div>
       ) : null}
     </section>
