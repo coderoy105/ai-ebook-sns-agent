@@ -63,6 +63,13 @@ export function GenerationProgress({ bookId }: { bookId: string }) {
 
   const { details } = state;
   const currentPath = [details.currentChapterTitle, details.currentSectionTitle].filter(Boolean).join(" › ");
+  const isIdleDraft = state.status === "DRAFT"
+    && state.progress <= 0
+    && details.completedSections <= 0
+    && details.generatedWords <= 0
+    && !currentPath;
+  if (isIdleDraft) return null;
+
   const sectionText = details.totalSections > 0
     ? `${details.completedSections} / ${details.totalSections} Sections`
     : "목차 준비 중";
