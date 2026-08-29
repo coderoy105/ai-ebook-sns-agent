@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { clearOpenRouterHandshake, getOpenRouterReturnPath, getOpenRouterVerifier, setFreeAiKey } from "@/lib/ai/openrouter-browser";
+import { clearOpenRouterHandshake, getOpenRouterReturnPath, getOpenRouterVerifier, markFreeAiJustConnected, setFreeAiKey } from "@/lib/ai/openrouter-browser";
 
 export default function OpenRouterCallbackPage() {
   const router = useRouter();
@@ -27,8 +27,9 @@ export default function OpenRouterCallbackPage() {
         const payload = await response.json();
         if (!response.ok || !payload.key) throw new Error(payload.error ?? "연결 실패");
         setFreeAiKey(payload.key);
+        markFreeAiJustConnected();
         clearOpenRouterHandshake();
-        setMessage("무료 AI 연결 완료. 책 작업으로 돌아갑니다…");
+        setMessage("무료 AI 연결 완료. 저장된 작업으로 돌아갑니다…");
         router.replace(returnTo.startsWith("/") ? returnTo : "/books/new");
       } catch (error) {
         setMessage(error instanceof Error ? error.message : "무료 AI 연결에 실패했습니다.");
