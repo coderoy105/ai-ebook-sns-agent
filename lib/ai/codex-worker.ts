@@ -1,4 +1,3 @@
-import { callCodexSandboxWorker, codexSandboxSupported } from "@/lib/ai/codex-sandbox";
 export const CODEX_LUNA_MODEL = "gpt-5.6-luna";
 
 export type CodexWorkerStatus = {
@@ -24,6 +23,17 @@ function workerConfig() {
   const baseUrl = process.env.CODEX_WORKER_URL?.trim().replace(/\/$/, "") ?? "";
   const secret = process.env.CODEX_WORKER_SHARED_SECRET?.trim() ?? "";
   return { baseUrl, secret };
+}
+
+function codexSandboxSupported() {
+  return process.env.VERCEL === "1" || Boolean(process.env.VERCEL_OIDC_TOKEN) || Boolean(
+    process.env.VERCEL_TOKEN && process.env.VERCEL_TEAM_ID && process.env.VERCEL_PROJECT_ID
+  );
+}
+
+async function callSandboxWorker<T>(pathWithQuery: string, request: WorkerRequest) {
+  const { callCodexSandboxWorker } = await import("@/lib/ai/codex-sandbox");
+  return callCodexSandboxWorker<T>(pathWithQuery, request);
 }
 
 export function codexWorkerConfigured() {
@@ -55,7 +65,7 @@ async function signature(secret: string, timestamp: string, nonce: string, metho
 export async function callCodexWorker<T>(pathWithQuery: string, request: WorkerRequest = {}): Promise<T> {
   const { baseUrl, secret } = workerConfig();
   if (!baseUrl || secret.length < 32) {
-    if (codexSandboxSupported()) return callCodexSandboxWorker<T>(pathWithQuery, request);
+    if (codexSandboxSupported()) return callSandboxWorker<T>(pathWithQuery, request);
     throw new Error("CODEX_WORKER_UNAVAILABLE");
   }
   if (!pathWithQuery.startsWith("/")) throw new Error("CODEX_WORKER_INVALID_PATH");
