@@ -14,6 +14,15 @@ type BookCard = {
   cover: { palette?: string[] } | null;
 };
 
+function statusLabel(status: string) {
+  if (status === "GENERATING") return "집필 중";
+  if (status === "PAUSED") return "일시정지";
+  if (status === "COMPLETED") return "완료";
+  if (status === "PLANNING") return "구성 중";
+  if (status === "FAILED") return "확인 필요";
+  return "초안";
+}
+
 export default async function DashboardPage() {
   const { supabase } = await requireUser();
   const { data } = await supabase
@@ -26,46 +35,64 @@ export default async function DashboardPage() {
     cover: Array.isArray(book.cover) ? (book.cover[0]?.concept ?? null) : null
   })) as BookCard[];
 
+  const activeCount = books.filter((book) => !["COMPLETED", "CANCELLED"].includes(book.status)).length;
+
   return (
     <AppShell>
-      <section className="hero">
+      <section className="dashboard-head">
         <div>
-          <div className="eyebrow">Your publishing desk</div>
-          <h1>아이디어에서 완성된 책까지.</h1>
+          <h1>책을 쓰는 과정이<br />한눈에 보이게.</h1>
+          <p>기획부터 장문 집필, 수정, 버전 관리, 내보내기까지 한 원고 안에서 이어집니다.</p>
         </div>
-        <div>
-          <p className="hero-copy">AI가 기획, 장문 집필, 기억, 일관성 검사, 편집, 디자인, 내보내기를 하나의 프로젝트로 관리합니다.</p>
-          <div className="actions">
-            <Link className="button" href="/books/new">새 책 만들기</Link>
-          </div>
-        </div>
+        <Link className="button button-primary" href="/books/new">새 책 시작</Link>
+      </section>
+
+      <section className="work-summary" aria-label="작업 요약">
+        <div><strong>{books.length}</strong><span>전체 원고</span></div>
+        <div><strong>{activeCount}</strong><span>진행 중</span></div>
+        <div><strong>{books.filter((book) => book.status === "COMPLETED").length}</strong><span>완성</span></div>
+        <p>무료 AI 생성은 Section 단위로 저장되며 중간에 멈춰도 이어서 작업할 수 있습니다.</p>
       </section>
 
       {books.length === 0 ? (
-        <section className="panel">
-          <div className="eyebrow">Empty library</div>
-          <h2 style={{ marginTop: 8 }}>첫 번째 책을 시작하세요.</h2>
-          <p className="muted">주제 한 줄만 적어도 독자, 장르, 제목, 목차와 분량을 자동 설계할 수 있습니다.</p>
-          <Link className="button" href="/books/new">Quick Create</Link>
+        <section className="empty-library">
+          <div className="empty-sheet" aria-hidden="true"><span /><span /><span /><span /></div>
+          <div>
+            <h2>아직 원고가 없습니다.</h2>
+            <p>한 문장으로 시작하면 독자, 장르, 목차와 분량을 설계한 뒤 실제 원고까지 이어서 작성합니다.</p>
+            <Link className="text-link" href="/books/new">첫 번째 책 설계하기</Link>
+          </div>
         </section>
       ) : (
-        <section className="grid">
-          {books.map((book) => (
-            <Link key={book.id} href={`/books/${book.id}`} className="book-card">
-              <div className="cover">
-                <span className="cover-kicker">{book.book_type}</span>
-                <span className="cover-title">{book.title}</span>
-                <span className="cover-kicker">{book.target_pages} pages target</span>
-              </div>
-              <div className="meta-row">
-                <div>
-                  <strong>{book.title}</strong>
-                  <div className="muted" style={{ fontSize: 12 }}>{Math.round(book.progress)}% · {book.status}</div>
-                </div>
-                <span className="status">{book.status}</span>
-              </div>
-            </Link>
-          ))}
+        <section className="library-section">
+          <div className="section-heading">
+            <h2>Manuscript queue</h2>
+            <span>{books.length} projects</span>
+          </div>
+          <div className="manuscript-list">
+            {books.map((book) => {
+              const progress = Math.max(0, Math.min(100, Number(book.progress)));
+              return (
+                <Link key={book.id} href={`/books/${book.id}`} className="manuscript-row">
+                  <div className="book-spine" aria-hidden="true">
+                    <span>{book.book_type}</span>
+                    <strong>{book.title}</strong>
+                    <small>{book.target_pages}P</small>
+                  </div>
+                  <div className="manuscript-copy">
+                    <strong>{book.title}</strong>
+                    <p>{book.subtitle || "부제 없이 작업 중인 원고"}</p>
+                    <span>마지막 작업 {new Date(book.updated_at).toLocaleDateString("ko-KR")}</span>
+                  </div>
+                  <div className="manuscript-progress">
+                    <div><span>진행률</span><strong>{Math.round(progress)}%</strong></div>
+                    <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>
+                  </div>
+                  <div className={`manuscript-state state-${book.status.toLowerCase()}`}>{statusLabel(book.status)}</div>
+                </Link>
+              );
+            })}
+          </div>
         </section>
       )}
     </AppShell>
