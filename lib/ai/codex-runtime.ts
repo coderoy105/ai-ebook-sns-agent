@@ -31,9 +31,8 @@ function envWithCodexHome(codexHome: string): CodexEnv {
   const nodeEnv = rawNodeEnv === "development" || rawNodeEnv === "test" || rawNodeEnv === "production" ? rawNodeEnv : "production";
   const env = { NODE_ENV: nodeEnv } as CodexEnv;
   for (const [key, value] of Object.entries(process.env)) {
-    if (typeof value === "string") env[key] = value;
+    if (key !== "NODE_ENV" && typeof value === "string") env[key] = value;
   }
-  env.NODE_ENV = nodeEnv;
   env.CODEX_HOME = codexHome;
   env.NO_COLOR = "1";
   return env;
