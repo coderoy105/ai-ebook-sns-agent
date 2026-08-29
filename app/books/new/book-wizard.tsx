@@ -209,6 +209,7 @@ export function BookWizard() {
 
   async function connectCodex() {
     setError("");
+    update("aiProvider", "codex");
     if (codexWorkerAvailable === false) {
       setError("ChatGPT Plus 연결 서버가 아직 준비되지 않았습니다. 현재는 OpenRouter Free를 사용해 주세요.");
       return;
@@ -366,15 +367,14 @@ export function BookWizard() {
       <div className="wizard-stage">
         <header className="wizard-header">
           <div><span className="step-count">{step + 1} / {steps.length}</span><h1>{stepTitle}</h1></div>
-          {form.aiProvider === "codex" ? (
-            codexConnected
+          <div className="panel-actions">
+            {codexConnected
               ? <button className="button secondary compact" disabled={loading || codexConnecting} onClick={disconnectCodex}>ChatGPT 연결 해제</button>
-              : <button className="button button-primary compact" disabled={loading || codexConnecting || codexWorkerAvailable === false} onClick={connectCodex}>{codexWorkerAvailable === false ? "연결 준비 중" : codexConnecting ? "OpenAI 로그인 완료를 기다리는 중…" : "ChatGPT로 계속하기"}</button>
-          ) : (
-            freeConnected
+              : <button className="button button-primary compact" disabled={loading || codexConnecting || codexWorkerAvailable === false} onClick={connectCodex}>{codexWorkerAvailable === false ? "연결 준비 중" : codexConnecting ? "OpenAI 로그인 완료를 기다리는 중…" : "ChatGPT로 계속하기"}</button>}
+            {form.aiProvider === "openrouter" && (freeConnected
               ? <button className="button secondary compact" disabled={loading} onClick={disconnectFreeAi}>무료 AI 연결 해제</button>
-              : <button className="button button-primary compact" disabled={loading} onClick={connectFreeAi}>무료 AI 연결</button>
-          )}
+              : <button className="button secondary compact" disabled={loading} onClick={connectFreeAi}>무료 AI 연결</button>)}
+          </div>
         </header>
 
         <div className="wizard-workspace">
