@@ -1,5 +1,3 @@
-import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
-
 export const CODEX_LUNA_MODEL = "gpt-5.6-luna";
 
 export type CodexWorkerStatus = {
@@ -19,6 +17,8 @@ type WorkerRequest = {
   timeoutMs?: number;
 };
 
+const encoder = new TextEncoder();
+
 function workerConfig() {
   const baseUrl = process.env.CODEX_WORKER_URL?.trim().replace(/\/$/, "") ?? "";
   const secret = process.env.CODEX_WORKER_SHARED_SECRET?.trim() ?? "";
@@ -30,10 +30,25 @@ export function codexWorkerConfigured() {
   return Boolean(baseUrl && secret.length >= 32);
 }
 
-function signature(secret: string, timestamp: string, nonce: string, method: string, pathWithQuery: string, bodyText: string) {
-  const bodyHash = createHash("sha256").update(bodyText).digest("hex");
+function bytesToHex(buffer: ArrayBuffer) {
+  return Array.from(new Uint8Array(buffer), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function sha256Hex(value: string) {
+  return bytesToHex(await crypto.subtle.digest("SHA-256", encoder.encode(value)));
+}
+
+async function signature(secret: string, timestamp: string, nonce: string, method: string, pathWithQuery: string, bodyText: string) {
+  const bodyHash = await sha256Hex(bodyText);
   const canonical = `${timestamp}\n${nonce}\n${method}\n${pathWithQuery}\n${bodyHash}`;
-  return createHmac("sha256", secret).update(canonical).digest("hex");
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  return bytesToHex(await crypto.subtle.sign("HMAC", key, encoder.encode(canonical)));
 }
 
 export async function callCodexWorker<T>(pathWithQuery: string, request: WorkerRequest = {}): Promise<T> {
@@ -44,7 +59,8 @@ export async function callCodexWorker<T>(pathWithQuery: string, request: WorkerR
   const method = request.method ?? (request.body ? "POST" : "GET");
   const bodyText = request.body ? JSON.stringify(request.body) : "";
   const timestamp = Date.now().toString();
-  const nonce = randomUUID();
+  const nonce = crypto.randomUUID();
+  const requestSignature = await signature(secret, timestamp, nonce, method, pathWithQuery, bodyText);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), request.timeoutMs ?? 30000);
 
@@ -55,7 +71,7 @@ export async function callCodexWorker<T>(pathWithQuery: string, request: WorkerR
         "content-type": "application/json",
         "x-bookstudio-timestamp": timestamp,
         "x-bookstudio-nonce": nonce,
-        "x-bookstudio-signature": signature(secret, timestamp, nonce, method, pathWithQuery, bodyText)
+        "x-bookstudio-signature": requestSignature
       },
       body: bodyText || undefined,
       cache: "no-store",
@@ -113,10 +129,13 @@ export async function generateCodexWorkerStructured<T>(userId: string, args: {
   return { value: args.parse(result.value), usage: result.usage };
 }
 
-// Exported only for deterministic unit tests of the signature contract.
-export function verifyCodexWorkerSignatureForTest(secret: string, signatureHex: string, timestamp: string, nonce: string, method: string, pathWithQuery: string, bodyText: string) {
-  const expected = signature(secret, timestamp, nonce, method, pathWithQuery, bodyText);
-  const a = Buffer.from(expected, "hex");
-  const b = Buffer.from(signatureHex, "hex");
-  return a.length === b.length && timingSafeEqual(a, b);
+// Exported only for deterministic unit tests of the shared HMAC contract.
+export async function verifyCodexWorkerSignatureForTest(secret: string, signatureHex: string, timestamp: string, nonce: string, method: string, pathWithQuery: string, bodyText: string) {
+  const expected = await signature(secret, timestamp, nonce, method, pathWithQuery, bodyText);
+  if (expected.length !== signatureHex.length) return false;
+  let difference = 0;
+  for (let index = 0; index < expected.length; index += 1) {
+    difference |= expected.charCodeAt(index) ^ signatureHex.charCodeAt(index);
+  }
+  return difference === 0;
 }
