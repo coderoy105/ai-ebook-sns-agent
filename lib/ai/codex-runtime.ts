@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 
 export const CODEX_LUNA_MODEL = "gpt-5.6-luna";
-const require = createRequire(import.meta.url);
+const requireFromProject = createRequire(join(process.cwd(), "package.json"));
 
 type JsonObject = Record<string, unknown>;
 type RpcResponse = { id?: number | string; result?: unknown; error?: { message?: string } };
@@ -39,7 +39,7 @@ function envWithCodexHome(codexHome: string): CodexEnv {
 }
 
 export function resolveCodexCliEntry() {
-  const packageJson = require.resolve("@openai/codex/package.json");
+  const packageJson = requireFromProject.resolve("@openai/codex/package.json");
   return join(dirname(packageJson), "bin", "codex.js");
 }
 
