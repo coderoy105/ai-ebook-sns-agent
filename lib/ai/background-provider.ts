@@ -1,6 +1,6 @@
 import { OpenRouterFreeProvider } from "@/lib/ai/openrouter-free";
 import { createServiceSupabase } from "@/lib/supabase/server";
-import { generateCodexBridgeStructured } from "@/lib/ai/codex-bridge-client";
+import { generateCodexRuntimeStructured } from "@/lib/ai/codex-runtime-client";
 
 export type BackgroundAiProvider = "openrouter" | "codex";
 
@@ -45,7 +45,7 @@ export async function generateBackgroundStructured<T>(
   userId: string,
   args: StructuredArgs<T>
 ): Promise<{ value: T; usage: Usage }> {
-  if (provider === "codex") return generateCodexBridgeStructured(userId, args);
+  if (provider === "codex") return generateCodexRuntimeStructured(userId, args);
   const key = await loadOpenRouterKey(userId);
   if (!key) throw new Error("FREE_AI_CONNECTION_REQUIRED");
   const client = new OpenRouterFreeProvider(key);
