@@ -58,6 +58,7 @@ export async function POST(request: Request) {
     await assertRateLimit(user.id, "book-create", 8, 3600);
 
     const targetWords = computeWordBudget(input.targetPages, input.bookType);
+    const planningInput = { ...input, targetWords };
     const reader = inferReaderProfile(input);
     const style = inferWritingStyle(input);
     const rule = getBookTypeRule(input.bookType);
@@ -128,7 +129,8 @@ export async function POST(request: Request) {
         citation_level: "none",
         image_frequency: 3,
         narrative_level: style.narrativeSpeed,
-        technical_depth: style.technicalVocabulary
+        technical_depth: style.technicalVocabulary,
+        planning_input: planningInput
       })
     ]);
     const setupError = setupResults.find((result) => result.error)?.error;
@@ -147,7 +149,7 @@ export async function POST(request: Request) {
       bookId: book.id,
       userId: user.id,
       jobId: job.id,
-      form: { ...input, targetWords }
+      form: planningInput
     }]);
 
     await Promise.all([
