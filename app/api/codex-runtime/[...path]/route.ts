@@ -22,6 +22,24 @@ const GenerateSchema = UserSchema.extend({
   timeoutMs: z.number().int().min(10000).max(240000).optional()
 });
 
+function describeError(value: unknown) {
+  if (typeof value === "string") return value.slice(0, 1600);
+  if (value instanceof Error) {
+    const cause = value.cause == null ? "" : `:${describeError(value.cause)}`;
+    return `${value.message || value.name}${cause}`.slice(0, 1600);
+  }
+  try {
+    const record = value as Record<string, unknown>;
+    const compact = Object.fromEntries(["name", "message", "code", "status", "statusCode", "error", "details"]
+      .filter((key) => record && key in record)
+      .map((key) => [key, record[key]]));
+    const text = JSON.stringify(compact);
+    return text && text !== "{}" ? text.slice(0, 1600) : String(value).slice(0, 1600);
+  } catch {
+    return String(value).slice(0, 1600);
+  }
+}
+
 async function assertProjectOidc(request: Request) {
   const authorization = request.headers.get("authorization") ?? "";
   const token = authorization.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
@@ -35,8 +53,8 @@ async function assertProjectOidc(request: Request) {
 
 function errorStatus(message: string) {
   if (message === "INTERNAL_UNAUTHORIZED") return 401;
-  if (message === "CODEX_WORKER_UNAVAILABLE") return 503;
-  if (message === "CODEX_USAGE_LIMIT") return 429;
+  if (message.startsWith("CODEX_WORKER_UNAVAILABLE") || message.startsWith("CODEX_SANDBOX_")) return 503;
+  if (message.startsWith("CODEX_USAGE_LIMIT")) return 429;
   return 400;
 }
 
@@ -83,7 +101,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ pat
 
     return NextResponse.json({ error: "CODEX_RUNTIME_ROUTE_NOT_FOUND" }, { status: 404 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "CODEX_RUNTIME_FAILED";
+    const message = describeError(error) || "CODEX_RUNTIME_FAILED";
     return NextResponse.json({ error: message }, { status: errorStatus(message) });
   }
 }
