@@ -124,11 +124,12 @@ export default function DashboardPage() {
     <AppShell>
       <section className="dashboard-head">
         <div className="dashboard-title-block">
-          <h1>원고가 움직이는<br />작업실.</h1>
-          <p>아이디어를 구조로 만들고, Section 단위로 집필하고, 수정과 내보내기까지 한 프로젝트에서 이어갑니다.</p>
+          <span className="page-eyebrow">Library</span>
+          <h1>작업 중인 원고</h1>
+          <p>책의 구조, 집필 상태, 수정 기록과 내보내기를 한 흐름에서 관리합니다.</p>
         </div>
         <div className="dashboard-head-actions">
-          <Link className="button button-primary" href="/books/new">새 책 시작 <span aria-hidden="true">↗</span></Link>
+          <Link className="button button-primary" href="/books/new">새 책 만들기 <span aria-hidden="true">＋</span></Link>
           <span>자동 저장 · 백그라운드 생성</span>
         </div>
       </section>
@@ -137,7 +138,7 @@ export default function DashboardPage() {
         <div><strong>{books.length}</strong><span>전체 원고</span></div>
         <div><strong>{activeCount}</strong><span>진행 중</span></div>
         <div><strong>{completedCount}</strong><span>완성</span></div>
-        <p>생성 상태와 완료된 Section은 서버에 저장됩니다. 다른 화면으로 이동해도 작업 흐름은 유지됩니다.</p>
+        <p>생성 상태와 완료된 Section은 서버에 저장되어 화면을 이동해도 이어집니다.</p>
       </section>
 
       {error ? <p className="notice" role="alert">{error}</p> : null}
@@ -145,8 +146,8 @@ export default function DashboardPage() {
       <section className="library-section" aria-labelledby="library-title">
         <div className="section-heading">
           <div>
-            <h2 id="library-title">원고 큐</h2>
-            <p>최근 작업 순서로 정렬됩니다.</p>
+            <span className="page-eyebrow">Projects</span>
+            <h2 id="library-title">최근 프로젝트</h2>
           </div>
           <div className="library-tabs" role="tablist" aria-label="원고 필터">
             <button type="button" role="tab" aria-selected={view === "all"} className={view === "all" ? "active" : ""} onClick={() => changeView("all")}>전체 <span>{books.length}</span></button>
@@ -161,9 +162,9 @@ export default function DashboardPage() {
           <div className="empty-library">
             <div className="empty-sheet" aria-hidden="true"><span /><span /><span /><span /></div>
             <div>
-              <h2>{books.length === 0 ? "아직 첫 원고가 없습니다." : "이 상태의 원고가 없습니다."}</h2>
-              <p>{books.length === 0 ? "한 문장으로 시작하면 독자, 장르, 목차와 분량을 설계한 뒤 실제 원고까지 이어서 작성합니다." : "필터를 바꾸거나 진행 중인 프로젝트의 상태를 확인해 보세요."}</p>
-              {books.length === 0 ? <Link className="text-link" href="/books/new">첫 번째 책 설계하기 <span aria-hidden="true">→</span></Link> : <button type="button" className="text-button" onClick={() => changeView("all")}>전체 원고 보기</button>}
+              <h2>{books.length === 0 ? "첫 원고를 시작해 보세요." : "이 상태의 원고가 없습니다."}</h2>
+              <p>{books.length === 0 ? "아이디어 한 문장에서 독자, 구조, 분량을 설계하고 실제 원고까지 이어서 작성합니다." : "필터를 바꾸거나 진행 중인 프로젝트의 상태를 확인해 보세요."}</p>
+              {books.length === 0 ? <Link className="text-link" href="/books/new">첫 번째 책 만들기 <span aria-hidden="true">→</span></Link> : <button type="button" className="text-button" onClick={() => changeView("all")}>전체 원고 보기</button>}
             </div>
           </div>
         ) : null}
@@ -193,7 +194,7 @@ export default function DashboardPage() {
                     <div className="progress-track" aria-label={`진행률 ${Math.round(progress)}%`}><span style={{ width: `${progress}%` }} /></div>
                     <small>{progress >= 100 ? "내보내기 준비됨" : "서버 진행률"}</small>
                   </div>
-                  <span className="row-arrow" aria-hidden="true">↗</span>
+                  <span className="row-arrow" aria-hidden="true">→</span>
                 </Link>
               );
             })}

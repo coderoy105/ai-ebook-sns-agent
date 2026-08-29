@@ -1,27 +1,39 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { ProductMark } from "./product-mark";
 
 const navigation = [
-  { href: "/dashboard", label: "작업실", meta: "Library", match: (pathname: string) => pathname === "/dashboard" },
-  { href: "/books/new", label: "새 책", meta: "Create", match: (pathname: string) => pathname.startsWith("/books/new") },
-  { href: "/dashboard?view=generating", label: "생성", meta: "Workflow", match: () => false }
+  { href: "/dashboard", label: "작업실", meta: "Library", key: "library" },
+  { href: "/books/new", label: "새 책", meta: "Create", key: "create" },
+  { href: "/dashboard?view=generating", label: "생성", meta: "Workflow", key: "workflow" }
 ] as const;
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const dashboardView = searchParams.get("view");
 
   return (
     <div className="shell">
       <a className="skip-link" href="#main-content">본문으로 건너뛰기</a>
+
+      <header className="mobile-appbar">
+        <ProductMark compact />
+        <Link className="mobile-appbar-action" href="/books/new">새 책 <span aria-hidden="true">＋</span></Link>
+      </header>
+
       <aside className="sidebar">
         <div className="sidebar-top">
           <ProductMark />
           <nav className="nav" aria-label="주요 메뉴">
             {navigation.map((item) => {
-              const active = item.match(pathname);
+              const active = item.key === "create"
+                ? pathname.startsWith("/books/new")
+                : item.key === "workflow"
+                  ? pathname === "/dashboard" && dashboardView === "generating"
+                  : pathname === "/dashboard" && dashboardView !== "generating";
               return (
                 <Link key={item.href} href={item.href} className={active ? "active" : ""} aria-current={active ? "page" : undefined}>
                   <span>{item.label}</span>

@@ -1,262 +1,230 @@
-# AI Book Studio — Editorial OS Design System
+# AI Book Studio — Editorial Workspace v2
 
-## Product category
-AI-assisted publishing and long-form manuscript production software.
+## Product lane
+AI-assisted publishing and long-form manuscript production software for individual writers, students, educators and solo creators.
 
-The product is not a book gallery and it is not a generic AI chat SaaS. It is an operating environment where an idea moves through blueprint, manuscript generation, revision, quality control and export.
+AI Book Studio is a **product workspace**, not a marketing dashboard, book gallery, or generic AI chat UI. The manuscript is the primary object. Navigation, generation status and AI controls must support it without visually competing with it.
 
-## Target audience
-- individual authors and first-time writers
-- students creating structured long-form work
-- solo creators and educators
-- users who want AI assistance without losing control of manuscript structure, drafts and production state
+## Reference synthesis
 
-## Visual direction
-**Editorial Operating System**
+### UI UX Pro Max
+The v2 direction combines the repository's **Swiss Modernism 2.0**, **E-Ink / Paper**, and **Editorial Grid / Magazine** lanes:
+- strong grid and typographic hierarchy
+- paper/material metaphor only for the manuscript itself
+- quiet application chrome
+- one global design system rather than page-by-page styling
 
-The UI combines the clarity of professional production software with the calm visual hierarchy of contemporary editorial design. The manuscript is the visual protagonist. Application chrome is precise, quiet and operational.
+### Impeccable
+The final critique rules used by this project are:
+- no oversized empty SaaS hero
+- no cards nested in cards
+- no purple/blue gradient branding
+- no low-contrast gray copy
+- no meaningless icon tiles or badges
+- no desktop layout merely stacked vertically on mobile
+- hierarchy must come from content, type, spacing and alignment before decoration
 
-The product deliberately avoids:
-- purple/blue gradient SaaS styling
-- glow and glassmorphism
-- card-inside-card layouts
-- decorative dashboard bento grids
-- oversized empty hero sections
-- rounded rectangles as the default container
-- decorative badges and meaningless icon rows
-- animation that does not explain state
+### shadcn/ui
+The repository does not use Tailwind/Radix today, so the shadcn package is not added merely for appearance. Its interaction conventions are still used for mobile Sheets/Drawers: explicit trigger state, `aria-controls`, `aria-expanded`, scrim dismissal, clear panel headings, close controls and large touch targets.
 
-## Design style
-- premium and restrained
-- contemporary editorial rather than literary nostalgia
-- strong hierarchy through type, whitespace and rules
-- one action accent, semantic colors only for state
-- open surfaces before cards
-- real paper depth only where physical-page metaphor matters
+### Magic UI
+Motion is used only where it explains live system state. The active generation progress receives a restrained moving highlight; decorative hero animation is intentionally excluded.
 
-## Color system
-### Core
-- Canvas: `#f3f4f1`
-- Surface: `#fbfcf9`
+### 21st.dev / 21st MCP
+The current ChatGPT environment has no 21st MCP connector/plugin available. Its MCP package cannot be invoked from this environment, so implementation does not block on it. Composition is instead evaluated against the same high-quality navigation, drawer, editor and dashboard pattern criteria.
+
+## Core visual direction
+**Editorial Workspace**
+
+The first redesign leaned too heavily on a dark “production console” metaphor. v2 removes that split personality. The application shell, creation wizard and editor now share a calm neutral workspace:
+- canvas: warm-neutral off-white
+- controls/panels: white or near-white
+- manuscript: true white paper with physical depth
+- text: near-black
+- one cobalt action color
+- semantic colors only for success/warning/error
+
+The dark rail is no longer a primary brand device.
+
+## Color
+- Canvas: `#f5f5f2`
+- Surface: `#ffffff`
+- Subtle surface: `#f9f9f7`
 - Paper: `#ffffff`
-- Ink: `#171914`
-- Ink soft: `#343730`
-- Muted text: `#70756b`
-- Strong muted text: `#555b50`
-- Border: `#d9ddd4`
-- Strong border: `#bcc3b7`
-
-### Brand/action
-- Primary cobalt: `#2447d8`
-- Primary hover: `#1736a6`
+- Ink: `#161713`
+- Ink soft: `#3f423b`
+- Muted: `#777c72`
+- Muted strong: `#5d6259`
+- Border: `#e2e4de`
+- Strong border: `#cdd1c8`
+- Primary: `#2f55e7`
+- Primary hover: `#1f42c8`
 - Primary soft: `#edf1ff`
+- Success: `#187453`
+- Warning: `#91600a`
+- Error: `#b13a30`
 
-### Semantic
-- Success: `#176b4d`
-- Warning: `#8a5b05`
-- Error: `#a83227`
-
-### Navigation
-- Graphite rail: `#171914`
-- Elevated graphite: `#22251f`
-- Rail divider: `#363a32`
-
-No other accent colors should be introduced without a semantic reason.
+No additional decorative accent colors.
 
 ## Typography
-The product UI uses a durable Korean-capable system sans stack. This avoids font downloads, improves first paint and keeps the interface native-feeling across macOS, Windows, Android and iOS.
-
 UI stack:
 `ui-sans-serif, -apple-system, BlinkMacSystemFont, Pretendard, Noto Sans KR, Apple SD Gothic Neo, Segoe UI, sans-serif`
 
 Manuscript stack:
 `Iowan Old Style, Noto Serif KR, Source Han Serif K, Georgia, serif`
 
-### Hierarchy
-- Display: 48–85px depending on authentication/product statement context only
-- Page H1: ~48–58px desktop, 37–43px mobile
-- H2: 24–30px
-- H3: 16px
-- Body: 16px base
-- Supporting UI body: 13–14px
-- Labels/status: 10–12px only where hierarchy permits
-
 Rules:
-- body copy should not become tiny to fit more controls
-- headings use tighter tracking, body copy does not
-- long explanatory text targets roughly 60–70ch
-- tabular numerals are used for progress and counts
-- monospace is reserved for logs/code-like data only
+- application page H1: 44–68px desktop, 36–48px mobile
+- H2: 22–30px
+- UI body: 13–16px
+- labels: 9–12px only when secondary
+- manuscript: ~16–17px with 1.82–1.92 line-height
+- avoid huge multiline marketing headlines inside the authenticated product
+- long copy max width ~54–68ch
 
 ## Spacing
-Use a 4px-derived scale:
-- 4
-- 8
-- 12
-- 16
-- 24
-- 32
-- 48
-- 64
-- 96
+4px-derived scale:
+`4 / 8 / 12 / 16 / 20 / 24 / 30 / 40 / 48 / 64 / 88`
 
-Section spacing is not mechanically identical. High-level page transitions use 48–96px, component interiors generally use 8–24px.
+Large whitespace is reserved for real information hierarchy, not decoration.
 
-## Radius
-Radius communicates role rather than decorating every surface:
-- XS 5px: compact chips/suggestions
-- SM 8px: buttons, inputs, navigation selections
-- MD 12px: major work surfaces
-- LG 18px: rare, only for large standalone surfaces
+## Radius and depth
+- compact control: 8–9px
+- major work surface: 11–14px
+- mobile bottom sheet: 18px top radius
+- manuscript page: nearly square
+- bottom control dock: 15px
 
-Paper pages keep near-square corners. Pills are reserved for true state labels.
+Ordinary sections use borders or whitespace. Shadow is reserved for:
+1. physical manuscript paper
+2. floating mobile sheets/docks
+3. rare active overlays
 
-## Shadow
-Only two depth metaphors are intentional:
-1. manuscript paper floating above the production canvas
-2. persistent generation dock above working content
+## Global application shell
+### Desktop
+- 224px quiet light navigation rail
+- content max ~1160–1180px
+- active item uses white surface + cobalt text, not a dark inverse block
 
-Ordinary panels use rules, tonal separation or whitespace instead of shadow.
+### Mobile
+- sticky 58px product header with compact brand and New Book action
+- persistent 64px bottom navigation for Library / Create / Workflow
+- safe-area aware
+- no page begins without product identity
 
-## Grid and layout
-### Global application shell
+## Dashboard
+The dashboard is an operational library, not a landing page.
+
+Priority:
+1. concise page title
+2. one primary New Book action
+3. compact counts
+4. recent project list
+5. generation progress/status
+
+Do not use giant promotional hero copy inside the authenticated library.
+
+## Creation wizard
+The wizard shares the same light product shell and typography.
+
 Desktop:
-- 236px graphite navigation rail
-- flexible content region
-- max production content ~1240px
-
-Tablet/mobile under ~900px:
-- navigation becomes a fixed bottom navigation
-- safe-area inset is respected
-- content receives enough bottom padding to remain unobscured
-
-### Dashboard
-A production queue, not a cover-card gallery.
-Each row prioritizes:
-1. title and current state
-2. recent activity
-3. progress
-4. small book identity marker
-
-### Book creation
-Desktop:
-- compact persistent step rail
-- one dominant work surface
-- sticky completion controls
+- compact step rail
+- one dominant white work surface
+- sticky actions
 
 Mobile:
-- horizontal sticky progress strip
-- one-column controls
-- primary navigation remains reachable above the bottom app navigation
+- horizontal step navigation
+- one-column forms
+- bottom app navigation remains reachable
+- primary action never hidden behind browser chrome/safe-area
 
-### Editor
-Desktop:
-- outline: 252px
+## Manuscript editor
+### Desktop
+Three work zones remain because they map to real tasks:
+- outline: ~254px
 - manuscript: flexible center
-- AI/production tools: 326px
+- AI/production inspector: ~316px
 
-The actual manuscript page remains the visual focus.
+All three zones use the same neutral product language. The outline is no longer a black visual wall.
 
-Tablet/mobile:
-- outline becomes a compact, bounded section
-- manuscript follows immediately
-- production/AI tools follow in reading order
-- no full-height side rail is forced onto a narrow viewport
+### Mobile — manuscript first
+This is the key v2 change.
 
-## Component language
-### Buttons
-- one primary action per immediate decision area
-- primary = cobalt
-- secondary = neutral outline/open surface
-- destructive = semantic error only when destructive
-- 44–48px touch height where practical
+The desktop rail layout must **never** be stacked top-to-bottom on a phone.
 
-### Inputs
-- explicit labels
-- visible hover and focus state
-- 48px standard control height
-- error text is announced and visually connected to the task
+Default mobile viewport shows:
+1. compact editor header
+2. current Section title + save state
+3. manuscript paper immediately
+4. fixed bottom editor dock
 
-### Surfaces
-Prefer:
-- open layout
-- section rules
-- tonal background changes
-- one strong work surface
+Bottom dock:
+- Outline
+- Manuscript (current)
+- AI / Tools
 
-Avoid wrapping every group in a card.
+Outline and AI open as bottom Sheets above the manuscript with a scrim and explicit close controls. Selecting a Section closes the outline sheet and returns directly to the manuscript.
 
-### Progress
-Use factual linear progress with exact percentage and current work state. Progress rings are not used.
+This prevents navigation chrome from consuming the first screen and makes the writing surface the primary product experience.
 
-## UX patterns
-### Background generation
-The user must understand that work persists after navigation or browser close. Generation state therefore appears both in relevant project controls and as a persistent bottom dock while active.
+## States and interaction
+Every interactive control needs:
+- default
+- hover
+- focus-visible
+- active/selected
+- disabled
+- loading where applicable
 
-### Draft safety
-Local draft recovery and server autosave remain visually distinct states:
+System states:
 - saved
 - saving
-- local temporary draft
+- local draft
 - recovered draft
-- server error with local preservation
+- server error
+- generation running
+- waiting for provider limit
+- reconnect needed
+- completed
 
-### Empty states
-Empty states explain the next useful action rather than presenting decorative illustrations.
-
-### Loading
-Skeletons mimic the destination layout so users understand what is loading. Full-screen spinners are avoided for content-heavy pages.
-
-### Error
-Errors use semantic copy and a clear recovery route. Raw technical error strings should not dominate the page when a user-facing explanation is available.
-
-## Interaction strategy
-Motion is functional and restrained:
-- progress interpolation
-- small hover movement where it communicates clickability
-- loading skeleton shimmer
-- no repeated entrance choreography
-
-`prefers-reduced-motion` collapses animation and transition duration.
-
-## Responsive strategy
-The product is designed from task priority, not by shrinking desktop pixels.
-
-Key rules:
-- no horizontal document UI overflow from 320px upward
-- bottom app navigation uses `env(safe-area-inset-bottom)`
-- touch targets remain usable
-- tables/grids collapse into readable vertical structures
-- side rails become bounded sections
-- manuscript logical page size never changes; the page presentation scales instead
+Generation animation must stop under `prefers-reduced-motion`.
 
 ## Accessibility
-Every interactive surface should pass these checks:
-- semantic landmark and heading structure
-- keyboard reachable controls
-- visible `:focus-visible`
-- form labels and autocomplete attributes
-- `aria-live` for asynchronous generation/login/error state where appropriate
-- no color-only communication for critical state
-- meaningful `aria-current` in navigation
-- skip-to-content link in the application shell
-- reduced motion support
-- sufficient foreground/background contrast
+- semantic landmarks
+- visible focus rings
+- minimum practical touch target ~40–44px
+- labels for form fields
+- `aria-current` for navigation/current manuscript
+- `aria-controls` + `aria-expanded` for mobile Sheets
+- scrim has an accessible close label
+- errors announced with alert/live regions where appropriate
+- reduced motion respected
 
-## Dependency philosophy
-The current application is Next.js/React/TypeScript with plain CSS and no Tailwind/Radix layer. The redesign therefore does not add shadcn/ui, Magic UI or a motion dependency merely for appearance.
+## Responsive QA checklist
+Test around:
+- 320px
+- 360–390px Android/iPhone widths
+- 768px tablet
+- 900px transition
+- 1180–1440px desktop
 
-Patterns borrowed from those ecosystems—accessible control states, robust focus behavior, compositional hierarchy and restrained micro-interaction—are implemented within the existing stack. New dependencies should only be introduced when they improve accessibility or maintainability more than they increase architectural cost.
+Reject if:
+- horizontal overflow appears
+- manuscript begins below a large navigation/outline block
+- bottom navigation obscures actions
+- titles wrap into visually dominant poster-like blocks
+- helper text drops below comfortable contrast
+- a desktop rail simply becomes a tall mobile section
 
-## Final critique checklist
-Before shipping a UI change, ask:
-1. Is the manuscript or primary task more obvious than the surrounding chrome?
-2. Could any card/border be replaced by spacing or a rule?
-3. Is there exactly one obvious primary action for the current decision?
-4. Is supporting text readable, not merely compact?
-5. Does mobile feel deliberately composed rather than stacked desktop?
-6. Are loading, empty, success, warning and error states coherent?
-7. Is the accent color communicating action/state rather than decoration?
-8. Is focus visible and keyboard order logical?
-9. Does any element look like a generic AI SaaS template convention?
-10. Would removing an effect improve clarity? If yes, remove it.
+## Anti-patterns
+Do not reintroduce:
+- dark console rail as the dominant mobile surface
+- giant authenticated-page marketing headlines
+- card/border around every section
+- bento grids without information need
+- glow, glass, purple gradient, decorative blobs
+- meaningless badges
+- repeated icon + title + paragraph feature cards
+- tiny body text to fit dense controls
+- shadcn default visual styling copied unchanged
+- animation used as decoration

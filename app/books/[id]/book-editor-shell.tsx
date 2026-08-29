@@ -118,7 +118,7 @@ function PlanningWorkspace({initialBook}:{initialBook:Book}) {
   const needsReconnect=jobStatus==="NEEDS_RECONNECT";
   const canRetry=jobStatus==="PAUSED_ERROR"||state.bookStatus==="FAILED";
 
-  return <div className="editor-shell">
+  return <div className="editor-shell planning-editor-shell">
     <aside className="editor-sidebar">
       <Link href="/dashboard" className="editor-brand"><span>AI BOOK</span><strong>STUDIO</strong></Link>
       <div className="manuscript-identity">
