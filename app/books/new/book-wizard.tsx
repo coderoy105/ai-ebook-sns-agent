@@ -33,7 +33,10 @@ export function BookWizard() {
   const [freeConnected, setFreeConnected] = useState(false);
   const steps = ["아이디어","책 종류","독자","문체","분량","템플릿","검토"];
 
-  useEffect(() => { setFreeConnected(Boolean(getFreeAiKey())); }, []);
+  useEffect(() => {
+    const timer = setTimeout(() => setFreeConnected(Boolean(getFreeAiKey())), 0);
+    return () => clearTimeout(timer);
+  }, []);
 
   const pageEstimate = useMemo(() => {
     const wordsPerPage = form.bookType === "아동용" ? 90 : form.bookType.includes("소설") ? 285 : 310;
