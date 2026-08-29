@@ -1,6 +1,5 @@
 import { OpenRouterFreeProvider } from "@/lib/ai/openrouter-free";
 import { createServiceSupabase } from "@/lib/supabase/server";
-import { generateCodexWorkerStructured, hasCodexWorkerConnection } from "@/lib/ai/codex-worker";
 
 export type BackgroundAiProvider = "openrouter" | "codex";
 
@@ -41,7 +40,10 @@ async function loadOpenRouterKey(userId: string) {
 }
 
 export async function hasBackgroundCredential(userId: string, provider: BackgroundAiProvider) {
-  if (provider === "codex") return hasCodexWorkerConnection(userId);
+  if (provider === "codex") {
+    const { hasCodexWorkerConnection } = await import("@/lib/ai/codex-worker");
+    return hasCodexWorkerConnection(userId);
+  }
   const service = createServiceSupabase();
   const { data, error } = await service.rpc<boolean>("has_openrouter_credential", { p_user_id: userId });
   if (error) throw new Error(error.message);
@@ -53,7 +55,10 @@ export async function generateBackgroundStructured<T>(
   userId: string,
   args: StructuredArgs<T>
 ): Promise<{ value: T; usage: Usage }> {
-  if (provider === "codex") return generateCodexWorkerStructured(userId, args);
+  if (provider === "codex") {
+    const { generateCodexWorkerStructured } = await import("@/lib/ai/codex-worker");
+    return generateCodexWorkerStructured(userId, args);
+  }
   const key = await loadOpenRouterKey(userId);
   if (!key) throw new Error("FREE_AI_CONNECTION_REQUIRED");
   const client = new OpenRouterFreeProvider(key);
