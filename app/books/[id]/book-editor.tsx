@@ -20,6 +20,14 @@ function sortBook(book: Book) {
   };
 }
 
+function statusLabel(status: string) {
+  if (status === "GENERATING") return "집필 중";
+  if (status === "PAUSED") return "일시정지";
+  if (status === "COMPLETED") return "완료";
+  if (status === "PLANNING") return "구성 중";
+  return status;
+}
+
 export function BookEditor({ initialBook }: { initialBook: Book }) {
   const [book,setBook] = useState(()=>sortBook(initialBook));
   const firstSection = book.parts[0]?.chapters[0]?.sections[0] ?? null;
@@ -146,51 +154,74 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
   }
 
   const scores=status.quality_scores??{};
+
   return <div className="editor-shell">
     <aside className="editor-sidebar">
-      <Link href="/dashboard" className="brand">AI Book Studio<small>← Library</small></Link>
-      <div style={{marginTop:24}}><strong>{book.title}</strong><p className="muted" style={{fontSize:12}}>{book.subtitle}</p></div>
-      <div className="tree">
+      <Link href="/dashboard" className="editor-brand"><span>AI BOOK</span><strong>STUDIO</strong></Link>
+      <div className="manuscript-identity">
+        <span>{book.book_type}</span>
+        <strong>{book.title}</strong>
+        <p>{book.subtitle || "부제 없음"}</p>
+      </div>
+      <div className="tree" aria-label="책 목차">
         {book.parts.map(part=><div key={part.id}>
           <div className="part" onDoubleClick={()=>rename("part",part.id,part.title)}>{part.title}</div>
           {part.chapters.map(chapter=><div key={chapter.id} className="outline-group">
-            <div className="outline-row"><span className="chapter-label" onDoubleClick={()=>rename("chapter",chapter.id,chapter.title)}>{chapter.position+1}. {chapter.title}</span><button className="mini" onClick={()=>add("section",chapter.id)}>＋</button></div>
+            <div className="outline-row chapter-row"><span className="chapter-label" onDoubleClick={()=>rename("chapter",chapter.id,chapter.title)}>{chapter.position+1}. {chapter.title}</span><button className="mini" aria-label="Section 추가" onClick={()=>add("section",chapter.id)}>+</button></div>
             {chapter.sections.map(section=><div key={section.id} className="outline-row" draggable onDragStart={(e)=>e.dataTransfer.setData("text/plain",section.id)} onDragOver={(e)=>e.preventDefault()} onDrop={(e)=>moveSection(chapter.id,e.dataTransfer.getData("text/plain"),section.id)}>
-              <button className={section.id===selectedId?"active":""} onClick={()=>selectSection(section)} onDoubleClick={()=>rename("section",section.id,section.title)}>{section.title}</button><button className="mini" onClick={()=>remove("section",section.id)}>×</button>
+              <button className={section.id===selectedId?"active":""} onClick={()=>selectSection(section)} onDoubleClick={()=>rename("section",section.id,section.title)}><span>{section.title}</span><small>{section.word_count ? `${section.word_count}w` : section.status}</small></button><button className="mini" aria-label="Section 삭제" onClick={()=>remove("section",section.id)}>×</button>
             </div>)}
-            <button className="mini add-row" onClick={()=>add("chapter",part.id)}>＋ Chapter</button>
+            <button className="mini add-row" onClick={()=>add("chapter",part.id)}>+ Chapter</button>
           </div>)}
         </div>)}
       </div>
-      <p className="muted help">Tip: 제목 더블클릭 = 이름 변경 · Section 드래그 = 순서 변경</p>
+      <p className="outline-help">제목 더블클릭으로 이름 변경 · Section 드래그로 순서 변경</p>
     </aside>
 
     <main className="editor-canvas">
-      <div className="editor-topbar"><div><div className="eyebrow">{selected?.layout_hint??"Book editor"}</div><h2>{selected?.title??"목차를 선택하세요"}</h2></div><span className={`save-state ${saveState}`}>{saveState === "saving" ? "Saving…" : saveState === "dirty" ? "Unsaved" : saveState === "error" ? "Save error" : "Saved"}</span></div>
-      <article className="page">{selected?<textarea aria-label="section manuscript" value={content} onChange={(e)=>changeContent(e.target.value)} placeholder="이 Section의 원고가 여기에 표시됩니다."/>:<p className="muted">목차에서 Section을 선택하세요.</p>}</article>
+      <div className="editor-topbar">
+        <div>
+          <div className="editor-context"><span>{selected?.layout_hint??"MANUSCRIPT"}</span><span>{selected?.word_count ?? 0} words</span></div>
+          <h2>{selected?.title??"목차에서 Section을 선택하세요"}</h2>
+        </div>
+        <span className={`save-state ${saveState}`}>{saveState === "saving" ? "저장 중" : saveState === "dirty" ? "저장 대기" : saveState === "error" ? "저장 오류" : "저장됨"}</span>
+      </div>
+      <article className="page">{selected?<textarea aria-label="section manuscript" value={content} onChange={(e)=>changeContent(e.target.value)} placeholder="이 Section의 원고가 여기에 표시됩니다."/>:<p className="muted">왼쪽 목차에서 편집할 Section을 선택하세요.</p>}</article>
     </main>
 
     <aside className="ai-panel">
-      <div className="eyebrow">Free AI Generation</div>
-      <div className="meta-row"><strong>{status.status}</strong><span>{Math.round(status.progress)}%</span></div><div className="progress-track"><span style={{width:`${Math.min(100,status.progress)}%`}}/></div>
-      <p className="muted" style={{fontSize:12}}>{freeConnected?"OpenRouter 무료 AI 연결됨 · 생성 비용 0원":"무료 AI 연결 후 집필을 시작할 수 있습니다."}</p>
-      <div className="actions">
-        {!freeConnected&&<button className="button" onClick={connectFreeAi}>무료 AI 연결</button>}
-        {freeConnected&&status.status!=="COMPLETED"&&status.status!=="PAUSED"&&!busy&&<button className="button" onClick={startGeneration}>{status.progress>0?"무료 이어서 생성":"무료로 책 생성"}</button>}
-        {busy&&<button className="button secondary" onClick={()=>control("pause")}>현재 Section 후 일시정지</button>}
-        {freeConnected&&status.status==="PAUSED"&&!busy&&<button className="button secondary" onClick={startGeneration}>무료 이어서 생성</button>}
-        {["GENERATING","PAUSED"].includes(status.status)&&<button className="button ghost" onClick={()=>control("cancel")}>Cancel</button>}
-      </div>
+      <section className="ai-module generation-module">
+        <div className="module-heading"><h3>무료 AI 생성</h3><span className={`state-badge state-${status.status.toLowerCase()}`}>{statusLabel(status.status)}</span></div>
+        <div className="generation-number"><strong>{Math.round(status.progress)}%</strong><span>전체 원고 진행률</span></div>
+        <div className="progress-track"><span style={{width:`${Math.min(100,status.progress)}%`}}/></div>
+        <p>{freeConnected?"OpenRouter 무료 모델이 연결되어 있습니다.":"무료 AI를 연결하면 Section 단위로 원고를 작성합니다."}</p>
+        <div className="panel-actions">
+          {!freeConnected&&<button className="button button-primary" onClick={connectFreeAi}>무료 AI 연결</button>}
+          {freeConnected&&status.status!=="COMPLETED"&&status.status!=="PAUSED"&&!busy&&<button className="button button-primary" onClick={startGeneration}>{status.progress>0?"이어서 생성":"책 생성 시작"}</button>}
+          {busy&&<button className="button secondary" onClick={()=>control("pause")}>현재 Section 후 정지</button>}
+          {freeConnected&&status.status==="PAUSED"&&!busy&&<button className="button button-primary" onClick={startGeneration}>이어서 생성</button>}
+          {["GENERATING","PAUSED"].includes(status.status)&&<button className="button ghost" onClick={()=>control("cancel")}>생성 취소</button>}
+        </div>
+      </section>
 
-      <hr className="rule"/><div className="eyebrow">Free AI Assistant</div><div className="ai-box field"><textarea value={command} onChange={(e)=>setCommand(e.target.value)} placeholder="예: 이 부분을 중학생이 이해하기 쉽게 바꾸고 구체적인 예시를 하나 추가해."/><button className="button" disabled={busy||!selected||!command.trim()} onClick={aiRewrite}>{busy?"Working…":"무료 AI로 수정"}</button></div>
+      <section className="ai-module">
+        <div className="module-heading"><h3>AI 편집 지시</h3></div>
+        <div className="ai-box field"><textarea value={command} onChange={(e)=>setCommand(e.target.value)} placeholder="예: 이 부분을 중학생이 이해하기 쉽게 바꾸고 구체적인 예시를 하나 추가해."/><button className="button secondary" disabled={busy||!selected||!command.trim()} onClick={aiRewrite}>{busy?"처리 중…":"선택 Section 수정"}</button></div>
+      </section>
 
-      <hr className="rule"/><div className="eyebrow">Version history</div><button className="button secondary" disabled={!selected} onClick={loadHistory}>Load history</button><div className="history-list">{history.slice(0,8).map(rev=><button key={rev.id} onClick={()=>restoreRevision(rev.id)}><b>{rev.revision_type}</b><span>{new Date(rev.created_at).toLocaleString("ko-KR")}</span><small>{rev.instruction??"manual edit"}</small></button>)}</div>
+      <section className="ai-module">
+        <div className="module-heading"><h3>버전 기록</h3><button className="text-button" disabled={!selected} onClick={loadHistory}>불러오기</button></div>
+        <div className="history-list">{history.slice(0,8).map(rev=><button key={rev.id} onClick={()=>restoreRevision(rev.id)}><b>{rev.revision_type}</b><span>{new Date(rev.created_at).toLocaleString("ko-KR")}</span><small>{rev.instruction??"manual edit"}</small></button>)}</div>
+      </section>
 
-      {status.quality_score!=null&&<><hr className="rule"/><div className="eyebrow">Book quality · {Math.round(Number(status.quality_score))}/100</div><div className="score-grid">{Object.entries(scores).map(([key,value])=><div className="score" key={key}><b>{Math.round(Number(value))}</b><span>{key}</span></div>)}</div></>}
+      {status.quality_score!=null&&<section className="ai-module"><div className="module-heading"><h3>품질 점검</h3><strong>{Math.round(Number(status.quality_score))}/100</strong></div><div className="score-grid">{Object.entries(scores).map(([key,value])=><div className="score" key={key}><b>{Math.round(Number(value))}</b><span>{key}</span></div>)}</div></section>}
 
-      <hr className="rule"/><div className="eyebrow">Export</div><div className="export-grid">{["pdf","epub","docx","md","txt"].map(format=><a className="button secondary" key={format} href={`/api/books/${book.id}/export/${format}`}>{format.toUpperCase()}</a>)}</div>
+      <section className="ai-module">
+        <div className="module-heading"><h3>내보내기</h3></div>
+        <div className="export-grid">{["pdf","epub","docx","md","txt"].map(format=><a className="export-link" key={format} href={`/api/books/${book.id}/export/${format}`}>{format.toUpperCase()}</a>)}</div>
+      </section>
 
-      {logs.length>0&&<><hr className="rule"/><div className="eyebrow">Generation log</div><div className="log">{logs.slice(0,12).map(log=><div key={log.id}>{new Date(log.created_at).toLocaleTimeString("ko-KR")} · {log.message}</div>)}</div></>}
+      {logs.length>0&&<section className="ai-module"><div className="module-heading"><h3>생성 로그</h3></div><div className="log">{logs.slice(0,12).map(log=><div key={log.id}>{new Date(log.created_at).toLocaleTimeString("ko-KR")} · {log.message}</div>)}</div></section>}
     </aside>
   </div>;
 }
