@@ -4,7 +4,7 @@ import { updateSession } from "@/lib/supabase/middleware";
 export async function proxy(request: NextRequest) {
   const response = await updateSession(request);
   const pathname = request.nextUrl.pathname;
-  const isPublic = pathname === "/login" || pathname.startsWith("/auth/") || pathname.startsWith("/api/auth/") || pathname.startsWith("/api/codex-runtime/") || pathname === "/api/health/service-bridge";
+  const isPublic = pathname === "/login" || pathname.startsWith("/auth/") || pathname.startsWith("/api/auth/") || pathname.startsWith("/api/codex-runtime/") || pathname === "/api/codex-runtime-probe-8e4f21a7" || pathname === "/api/health/service-bridge";
 
   if (!isPublic && response.headers.get("x-ai-book-user") !== "authenticated") {
     const url = request.nextUrl.clone();
