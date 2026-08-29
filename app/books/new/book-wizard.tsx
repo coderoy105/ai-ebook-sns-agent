@@ -378,6 +378,10 @@ export function BookWizard() {
           </div>
         </header>
 
+        {devicePrompt && (
+          <ChatGptDeviceCodePanel verificationUrl={devicePrompt.verificationUrl} userCode={devicePrompt.userCode} />
+        )}
+
         <div className="wizard-workspace">
           {step === 0 && (
             <div className="wizard-section">
@@ -459,13 +463,9 @@ export function BookWizard() {
               {form.aiProvider === "codex" && !codexConnected && (
                 <div className="research-note">
                   <strong>ChatGPT Plus 연결</strong>
-                  <p>{codexWorkerAvailable === false ? "현재 ChatGPT 연결 기능을 준비할 수 없습니다. 잠시 후 다시 시도하거나 OpenRouter Free를 사용할 수 있습니다." : "버튼을 누르면 OpenAI 공식 인증 페이지가 열립니다. OpenAI 페이지에는 “Codex CLI”라는 문구가 표시될 수 있지만 터미널을 직접 사용할 필요는 없습니다. 계정 로그인 후 자동 복사된 인증 코드를 붙여넣으면 이 화면이 연결 완료를 자동으로 확인합니다."}</p>
+                  <p>{codexWorkerAvailable === false ? "현재 ChatGPT 연결 기능을 준비할 수 없습니다. 잠시 후 다시 시도하거나 OpenRouter Free를 사용할 수 있습니다." : "버튼을 누르면 먼저 이 화면에 9자리 일회용 코드가 크게 표시되고 자동 복사를 시도합니다. 코드를 확인한 다음 “OpenAI 인증 페이지 열기”를 눌러 붙여넣으세요. OpenAI 페이지에 “Codex CLI”라는 문구가 표시돼도 정상이며 터미널을 직접 사용할 필요는 없습니다."}</p>
                   <button className="button button-primary compact" disabled={codexConnecting || codexWorkerAvailable === false} onClick={connectCodex}>{codexWorkerAvailable === false ? "연결 준비 중" : codexConnecting ? "OpenAI 로그인 완료를 기다리는 중…" : "ChatGPT로 계속하기"}</button>
                 </div>
-              )}
-
-              {devicePrompt && (
-                <ChatGptDeviceCodePanel verificationUrl={devicePrompt.verificationUrl} userCode={devicePrompt.userCode} />
               )}
 
               {form.aiProvider === "codex" && codexConnected && (
