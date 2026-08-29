@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { beginFreeAiConnect, getFreeAiKey } from "@/lib/ai/openrouter-browser";
+import { connectCodexChatGPT, getCodexConnectionStatus, type CodexDeviceEvent } from "@/lib/ai/codex-browser";
 
 type Section = { id:string; title:string; goal:string|null; position:number; status:string; target_words:number; word_count:number; content_markdown:string|null; summary:string|null; layout_hint:string|null };
 type Chapter = { id:string; title:string; goal:string|null; position:number; status:string; target_words:number; word_count:number; sections:Section[] };
@@ -11,6 +12,8 @@ export type Book = { id:string; title:string; subtitle:string|null; idea:string;
 type Revision = { id:string; revision_type:string; instruction:string|null; title_before:string|null; content_before:string|null; created_at:string };
 type GenerationLog = { id:string; created_at:string; message:string };
 type LocalSectionDraft = { content:string; updatedAt:number };
+type AiProvider = "openrouter" | "codex";
+type DevicePrompt = { verificationUrl:string; userCode:string };
 
 function sortBook(book: Book) {
   return {
@@ -22,7 +25,7 @@ function sortBook(book: Book) {
 }
 
 function statusLabel(status: string, jobStatus?: string) {
-  if (jobStatus === "WAITING_LIMIT") return "무료 한도 대기";
+  if (jobStatus === "WAITING_LIMIT") return "사용 한도 대기";
   if (jobStatus === "NEEDS_RECONNECT") return "AI 재연결 필요";
   if (jobStatus === "PAUSED_ERROR") return "오류로 일시정지";
   if (jobStatus === "QUEUED") return "작업 등록 중";
@@ -45,17 +48,12 @@ function readSectionDraft(bookId:string, sectionId:string):LocalSectionDraft|nul
     if(!raw) return null;
     const parsed=JSON.parse(raw) as LocalSectionDraft;
     return parsed && typeof parsed.content === "string" ? parsed : null;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 function writeSectionDraft(bookId:string, sectionId:string, content:string) {
-  try {
-    localStorage.setItem(draftKey(bookId,sectionId),JSON.stringify({content,updatedAt:Date.now()} satisfies LocalSectionDraft));
-  } catch {
-    // Keep the editor usable even if browser storage is unavailable.
-  }
+  try { localStorage.setItem(draftKey(bookId,sectionId),JSON.stringify({content,updatedAt:Date.now()} satisfies LocalSectionDraft)); }
+  catch { /* browser storage can be unavailable */ }
 }
 
 function clearSectionDraft(bookId:string, sectionId:string) {
@@ -76,6 +74,10 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
   const [command,setCommand] = useState("");
   const [busy,setBusy] = useState(false);
   const [freeConnected,setFreeConnected] = useState(false);
+  const [codexConnected,setCodexConnected] = useState(false);
+  const [codexConnecting,setCodexConnecting] = useState(false);
+  const [devicePrompt,setDevicePrompt] = useState<DevicePrompt|null>(null);
+  const [aiProvider,setAiProvider] = useState<AiProvider>("openrouter");
   const [logs,setLogs] = useState<GenerationLog[]>([]);
   const [status,setStatus] = useState({status:book.status,jobStatus:"",progress:Number(book.progress),quality_score:book.quality_score,quality_scores:book.quality_scores});
   const [history,setHistory] = useState<Revision[]>([]);
@@ -85,6 +87,7 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
     const res=await fetch(`/api/books/${book.id}/status`,{cache:"no-store"});
     if(!res.ok) return;
     const data=await res.json();
+    setAiProvider(data.aiProvider==="codex"?"codex":"openrouter");
     setStatus({
       status:data.book.status,
       jobStatus:data.job?.status??"",
@@ -97,13 +100,13 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
 
   const refreshConnection = useCallback(async()=>{
     const localConnected=Boolean(getFreeAiKey());
-    try {
-      const res=await fetch("/api/auth/openrouter/connection",{cache:"no-store"});
-      const data=await res.json();
-      setFreeConnected(localConnected || (res.ok && data.connected===true));
-    } catch {
-      setFreeConnected(localConnected);
-    }
+    const [freeResult,codexResult]=await Promise.allSettled([
+      fetch("/api/auth/openrouter/connection",{cache:"no-store"}).then(async res=>({res,data:await res.json()})),
+      getCodexConnectionStatus()
+    ]);
+    if(freeResult.status==="fulfilled") setFreeConnected(localConnected || (freeResult.value.res.ok && freeResult.value.data.connected===true));
+    else setFreeConnected(localConnected);
+    if(codexResult.status==="fulfilled") setCodexConnected(codexResult.value.connected===true && codexResult.value.modelAvailable!==false);
   },[]);
 
   useEffect(()=>{
@@ -119,10 +122,7 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
     const timer=setTimeout(()=>{
       if(!firstSectionId || selectedIdRef.current!==firstSectionId) return;
       const draft=readSectionDraft(book.id,firstSectionId);
-      if(draft && draft.content!==firstServerContent){
-        setContent(draft.content);
-        setSaveState("recovered");
-      }
+      if(draft && draft.content!==firstServerContent){ setContent(draft.content); setSaveState("recovered"); }
     },0);
     return()=>clearTimeout(timer);
   },[book.id,firstSectionId,firstServerContent]);
@@ -136,16 +136,11 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
     if(selectedIdRef.current===sectionId) setSaveState("saving");
     try {
       const res=await fetch(`/api/sections/${sectionId}`,{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({content:nextContent})});
-      if(!res.ok){
-        if(selectedIdRef.current===sectionId) setSaveState("error");
-        return;
-      }
+      if(!res.ok){ if(selectedIdRef.current===sectionId) setSaveState("error"); return; }
       clearSectionDraft(book.id,sectionId);
       patchLocalSection(sectionId,{content_markdown:nextContent,word_count:nextContent.trim().split(/\s+/).filter(Boolean).length});
       if(selectedIdRef.current===sectionId) setSaveState("saved");
-    } catch {
-      if(selectedIdRef.current===sectionId) setSaveState("error");
-    }
+    } catch { if(selectedIdRef.current===sectionId) setSaveState("error"); }
   }
 
   async function saveNow(nextContent=content) {
@@ -157,18 +152,12 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
     if(section.id===selectedId) return;
     if(saveTimer.current){ clearTimeout(saveTimer.current); saveTimer.current=null; }
     if(selected && ["dirty","recovered","error"].includes(saveState)) void saveSection(selected.id,content);
-
     selectedIdRef.current=section.id;
     setSelectedId(section.id);
     const serverContent=section.content_markdown ?? "";
     const draft=readSectionDraft(book.id,section.id);
-    if(draft && draft.content!==serverContent){
-      setContent(draft.content);
-      setSaveState("recovered");
-    } else {
-      setContent(serverContent);
-      setSaveState("saved");
-    }
+    if(draft && draft.content!==serverContent){ setContent(draft.content); setSaveState("recovered"); }
+    else { setContent(serverContent); setSaveState("saved"); }
     setHistory([]);
   }
 
@@ -179,13 +168,22 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
     setSaveState("dirty");
     if(saveTimer.current) clearTimeout(saveTimer.current);
     const sectionId=selected.id;
-    saveTimer.current=setTimeout(()=>{
-      saveTimer.current=null;
-      void saveSection(sectionId,value);
-    },650);
+    saveTimer.current=setTimeout(()=>{ saveTimer.current=null; void saveSection(sectionId,value); },650);
   }
 
   async function connectFreeAi(){ await beginFreeAiConnect(`/books/${book.id}`); }
+
+  async function connectCodex(){
+    setCodexConnecting(true);setDevicePrompt(null);
+    try{
+      const result=await connectCodexChatGPT({onEvent(event:CodexDeviceEvent){if(event.type==="device_code")setDevicePrompt({verificationUrl:event.verificationUrl,userCode:event.userCode});}});
+      if(!result.modelAvailable) throw new Error("이 ChatGPT 계정에서 GPT-5.6 Luna를 사용할 수 없습니다.");
+      setCodexConnected(true);setDevicePrompt(null);await refreshStatus();
+    }catch(error){alert(error instanceof Error?error.message:"ChatGPT Plus 연결에 실패했습니다.");}
+    finally{setCodexConnecting(false);}
+  }
+
+  async function connectCurrentProvider(){ if(aiProvider==="codex")await connectCodex();else await connectFreeAi(); }
 
   async function control(action:"pause"|"resume"|"cancel"){
     const r=await fetch(`/api/books/${book.id}/control`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action})});
@@ -195,24 +193,24 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
   async function startGeneration(){
     setBusy(true);
     try{
-      const key=getFreeAiKey();
       const headers:Record<string,string>={};
-      if(key) headers["x-openrouter-key"]=key;
+      if(aiProvider==="openrouter"){
+        const key=getFreeAiKey();
+        if(key) headers["x-openrouter-key"]=key;
+      }
       const r=await fetch(`/api/books/${book.id}/generate`,{method:"POST",headers});
       const data=await r.json();
       if(r.status===428 || data.reconnect){
-        await connectFreeAi();
+        if(data.provider==="codex" || aiProvider==="codex") await connectCodex();
+        else await connectFreeAi();
         return;
       }
       if(!r.ok) throw new Error(data.error??"백그라운드 책 생성 시작에 실패했습니다.");
-      setFreeConnected(true);
+      if(data.provider==="codex")setCodexConnected(true);else setFreeConnected(true);
       setStatus(s=>({...s,status:data.done?"COMPLETED":"GENERATING",jobStatus:data.done?"COMPLETED":"GENERATING",progress:Number(data.progress??s.progress)}));
       await refreshStatus();
-    }catch(error){
-      alert(error instanceof Error?error.message:"백그라운드 책 생성 시작에 실패했습니다.");
-    }finally{
-      setBusy(false);
-    }
+    }catch(error){ alert(error instanceof Error?error.message:"백그라운드 책 생성 시작에 실패했습니다."); }
+    finally{ setBusy(false); }
   }
 
   async function aiRewrite(){
@@ -245,15 +243,13 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
   const scores=status.quality_scores??{};
   const backgroundRunning=status.status==="GENERATING" || ["QUEUED","GENERATING","WAITING_LIMIT"].includes(status.jobStatus);
   const needsReconnect=status.jobStatus==="NEEDS_RECONNECT";
+  const providerConnected=aiProvider==="codex"?codexConnected:freeConnected;
+  const providerLabel=aiProvider==="codex"?"GPT-5.6 Luna · ChatGPT Plus":"OpenRouter Free";
 
   return <div className="editor-shell">
     <aside className="editor-sidebar">
       <Link href="/dashboard" className="editor-brand"><span>AI BOOK</span><strong>STUDIO</strong></Link>
-      <div className="manuscript-identity">
-        <span>{book.book_type}</span>
-        <strong>{book.title}</strong>
-        <p>{book.subtitle || "부제 없음"}</p>
-      </div>
+      <div className="manuscript-identity"><span>{book.book_type}</span><strong>{book.title}</strong><p>{book.subtitle || "부제 없음"}</p></div>
       <div className="tree" aria-label="책 목차">
         {book.parts.map(part=><div key={part.id}>
           <div className="part" onDoubleClick={()=>rename("part",part.id,part.title)}>{part.title}</div>
@@ -271,10 +267,7 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
 
     <main className="editor-canvas">
       <div className="editor-topbar">
-        <div>
-          <div className="editor-context"><span>{selected?.layout_hint??"MANUSCRIPT"}</span><span>{selected?.word_count ?? 0} words</span></div>
-          <h2>{selected?.title??"목차에서 Section을 선택하세요"}</h2>
-        </div>
+        <div><div className="editor-context"><span>{selected?.layout_hint??"MANUSCRIPT"}</span><span>{selected?.word_count ?? 0} words</span></div><h2>{selected?.title??"목차에서 Section을 선택하세요"}</h2></div>
         <span className={`save-state ${saveState}`}>{saveState === "saving" ? "서버 저장 중" : saveState === "dirty" ? "기기에 임시저장됨" : saveState === "recovered" ? "임시저장 복원됨" : saveState === "error" ? "서버 저장 오류 · 기기에는 보관됨" : "저장됨"}</span>
       </div>
       <article className="page">{selected?<textarea aria-label="section manuscript" value={content} onChange={(e)=>changeContent(e.target.value)} placeholder="이 Section의 원고가 여기에 표시됩니다."/>:<p className="muted">왼쪽 목차에서 편집할 Section을 선택하세요.</p>}</article>
@@ -282,20 +275,23 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
 
     <aside className="ai-panel">
       <section className="ai-module generation-module">
-        <div className="module-heading"><h3>무료 AI 생성</h3><span className={`state-badge state-${(status.jobStatus||status.status).toLowerCase()}`}>{statusLabel(status.status,status.jobStatus)}</span></div>
+        <div className="module-heading"><h3>AI 백그라운드 생성</h3><span className={`state-badge state-${(status.jobStatus||status.status).toLowerCase()}`}>{statusLabel(status.status,status.jobStatus)}</span></div>
+        <p className="muted">{providerLabel}</p>
         <div className="generation-number"><strong>{Math.round(status.progress)}%</strong><span>전체 원고 진행률</span></div>
         <div className="progress-track"><span style={{width:`${Math.min(100,status.progress)}%`}}/></div>
         <p>{status.jobStatus==="WAITING_LIMIT"
-          ? "오늘 무료 한도를 다 사용했습니다. 작성된 원고는 저장됐고 Workflow가 대기 후 자동으로 이어갑니다."
+          ? `${providerLabel} 사용 한도 대기 중입니다. 작성된 원고는 저장됐고 Workflow가 자동으로 다시 확인합니다.`
           : backgroundRunning
-            ? "백그라운드에서 집필 중입니다. 다른 화면으로 이동하거나 브라우저를 닫아도 계속 진행됩니다."
-            : freeConnected
-              ? "무료 AI가 서버 Vault에도 연결되어 있어 백그라운드 생성이 가능합니다."
-              : "무료 AI를 한 번 연결하면 이후 생성 작업은 백그라운드에서 계속됩니다."}</p>
+            ? `${providerLabel}로 백그라운드 집필 중입니다. 다른 화면으로 이동하거나 브라우저를 닫아도 계속 진행됩니다.`
+            : providerConnected
+              ? `${providerLabel}가 서버에 연결되어 있어 백그라운드 생성이 가능합니다.`
+              : `${providerLabel} 연결이 필요합니다.`}</p>
+
+        {devicePrompt&&<div className="research-note"><strong>OpenAI 기기 코드: {devicePrompt.userCode}</strong><p>새 탭의 OpenAI 로그인 페이지에서 이 코드를 입력하세요.</p><a className="button secondary compact" href={devicePrompt.verificationUrl} target="_blank" rel="noreferrer">로그인 페이지 열기</a></div>}
         <div className="panel-actions">
-          {(!freeConnected||needsReconnect)&&<button className="button button-primary" onClick={connectFreeAi}>무료 AI {needsReconnect?"다시 ":""}연결</button>}
-          {freeConnected&&!backgroundRunning&&status.status!=="COMPLETED"&&status.status!=="PAUSED"&&!busy&&<button className="button button-primary" onClick={startGeneration}>{status.progress>0?"백그라운드 이어서 생성":"백그라운드 책 생성 시작"}</button>}
-          {freeConnected&&status.status==="PAUSED"&&!needsReconnect&&!busy&&<button className="button button-primary" onClick={startGeneration}>백그라운드 이어서 생성</button>}
+          {(!providerConnected||needsReconnect)&&<button className="button button-primary" disabled={codexConnecting} onClick={connectCurrentProvider}>{codexConnecting?"ChatGPT 로그인 대기 중…":`${providerLabel} ${needsReconnect?"다시 ":""}연결`}</button>}
+          {providerConnected&&!backgroundRunning&&status.status!=="COMPLETED"&&status.status!=="PAUSED"&&!busy&&<button className="button button-primary" onClick={startGeneration}>{status.progress>0?"백그라운드 이어서 생성":"백그라운드 책 생성 시작"}</button>}
+          {providerConnected&&status.status==="PAUSED"&&!needsReconnect&&!busy&&<button className="button button-primary" onClick={startGeneration}>백그라운드 이어서 생성</button>}
           {busy&&<button className="button secondary" disabled>작업 등록 중…</button>}
           {backgroundRunning&&status.jobStatus!=="WAITING_LIMIT"&&<button className="button secondary" onClick={()=>control("pause")}>현재 Section 후 정지</button>}
           {["GENERATING","PAUSED"].includes(status.status)&&<button className="button ghost" onClick={()=>control("cancel")}>생성 취소</button>}
@@ -314,10 +310,7 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
 
       {status.quality_score!=null&&<section className="ai-module"><div className="module-heading"><h3>품질 점검</h3><strong>{Math.round(Number(status.quality_score))}/100</strong></div><div className="score-grid">{Object.entries(scores).map(([key,value])=><div className="score" key={key}><b>{Math.round(Number(value))}</b><span>{key}</span></div>)}</div></section>}
 
-      <section className="ai-module">
-        <div className="module-heading"><h3>내보내기</h3></div>
-        <div className="export-grid">{["pdf","epub","docx","md","txt"].map(format=><a className="export-link" key={format} href={`/api/books/${book.id}/export/${format}`}>{format.toUpperCase()}</a>)}</div>
-      </section>
+      <section className="ai-module"><div className="module-heading"><h3>내보내기</h3></div><div className="export-grid">{["pdf","epub","docx","md","txt"].map(format=><a className="export-link" key={format} href={`/api/books/${book.id}/export/${format}`}>{format.toUpperCase()}</a>)}</div></section>
 
       {logs.length>0&&<section className="ai-module"><div className="module-heading"><h3>생성 로그</h3></div><div className="log">{logs.slice(0,12).map(log=><div key={log.id}>{new Date(log.created_at).toLocaleTimeString("ko-KR")} · {log.message}</div>)}</div></section>}
     </aside>
