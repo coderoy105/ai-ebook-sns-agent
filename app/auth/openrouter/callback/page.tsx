@@ -1,16 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { clearOpenRouterHandshake, getOpenRouterReturnPath, getOpenRouterVerifier, setFreeAiKey } from "@/lib/ai/openrouter-browser";
 
 export default function OpenRouterCallbackPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [message, setMessage] = useState("무료 AI를 연결하는 중입니다…");
 
   useEffect(() => {
-    const code = searchParams.get("code");
+    const code = new URLSearchParams(window.location.search).get("code");
     const verifier = getOpenRouterVerifier();
     const returnTo = getOpenRouterReturnPath();
     if (!code || !verifier) {
@@ -35,7 +34,7 @@ export default function OpenRouterCallbackPage() {
         setMessage(error instanceof Error ? error.message : "무료 AI 연결에 실패했습니다.");
       }
     })();
-  }, [router, searchParams]);
+  }, [router]);
 
   return <main className="login"><section className="panel login-card"><div className="eyebrow">FREE AI</div><h1>OpenRouter 연결</h1><p className="muted">{message}</p></section></main>;
 }
