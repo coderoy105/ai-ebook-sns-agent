@@ -18,15 +18,17 @@ export type CodexConnectionStatus = {
   rateLimits?: unknown;
 };
 
+const CODEX_CONNECTION_URL = "/api/auth/openrouter/connection?provider=codex";
+
 export async function getCodexConnectionStatus(): Promise<CodexConnectionStatus> {
-  const response = await fetch("/api/auth/codex/connection", { cache: "no-store" });
+  const response = await fetch(CODEX_CONNECTION_URL, { cache: "no-store" });
   const payload = await response.json();
   if (!response.ok) throw new Error(payload.error ?? "CODEX_CONNECTION_STATUS_FAILED");
   return payload as CodexConnectionStatus;
 }
 
 export async function disconnectCodexChatGPT() {
-  const response = await fetch("/api/auth/codex/connection", { method: "DELETE" });
+  const response = await fetch(CODEX_CONNECTION_URL, { method: "DELETE" });
   const payload = await response.json();
   if (!response.ok) throw new Error(payload.error ?? "CODEX_DISCONNECT_FAILED");
 }
@@ -35,7 +37,7 @@ export async function connectCodexChatGPT(options?: {
   onEvent?: (event: CodexDeviceEvent) => void;
   openVerificationPage?: boolean;
 }): Promise<CodexConnectedEvent> {
-  const response = await fetch("/api/auth/codex/device", { method: "POST", cache: "no-store" });
+  const response = await fetch(CODEX_CONNECTION_URL, { method: "POST", cache: "no-store" });
   if (!response.ok || !response.body) {
     let error = "CODEX_LOGIN_START_FAILED";
     try { error = (await response.json()).error ?? error; } catch { /* no-op */ }
