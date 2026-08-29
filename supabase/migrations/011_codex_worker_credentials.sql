@@ -3,8 +3,13 @@ begin;
 -- Codex managed OAuth credentials now live exclusively in each user's
 -- persistent CODEX_HOME on the Codex Worker. Supabase keeps connection
 -- metadata only; it must not store access/refresh tokens or auth.json.
-delete from public.ai_provider_credentials
-where provider = 'codex_chatgpt';
+with removed as (
+  delete from public.ai_provider_credentials
+  where provider = 'codex_chatgpt'
+  returning vault_secret_id
+)
+delete from vault.secrets
+where id in (select vault_secret_id from removed where vault_secret_id is not null);
 
 drop function if exists public.store_codex_chatgpt_credential(uuid,text,text,text,boolean,jsonb);
 drop function if exists public.has_codex_chatgpt_credential(uuid);
