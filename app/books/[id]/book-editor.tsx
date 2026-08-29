@@ -144,11 +144,6 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
     } catch { if(selectedIdRef.current===sectionId) setSaveState("error"); }
   }
 
-  async function saveNow(nextContent=content) {
-    if(!selected) return;
-    await saveSection(selected.id,nextContent);
-  }
-
   function selectSection(section:Section) {
     if(section.id===selectedId) return;
     if(saveTimer.current){ clearTimeout(saveTimer.current); saveTimer.current=null; }
