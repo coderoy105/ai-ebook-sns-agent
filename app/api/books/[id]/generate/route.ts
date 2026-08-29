@@ -5,13 +5,25 @@ import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 import { assertRateLimit } from "@/lib/security/rate-limit";
 import { backgroundProviderLabel, hasBackgroundCredential, normalizeBackgroundProvider } from "@/lib/ai/background-provider";
 
+export const runtime = "nodejs";
+export const maxDuration = 300;
+
 const activeStatuses = ["QUEUED", "GENERATING", "WAITING_LIMIT", "PAUSED"];
 
 type SettingsRelation = { planning_input?: { aiProvider?: unknown } | null } | Array<{ planning_input?: { aiProvider?: unknown } | null }> | null;
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+
+  // The Workflow calls the same deployed Function through a project-scoped
+  // Vercel OIDC token. Keeping this inside the existing generation route avoids
+  // consuming another Hobby-plan Serverless Function while preserving isolation.
+  if (id === "codex" && request.headers.get("authorization")?.startsWith("Bearer ")) {
+    const { handleCodexGenerationBridge } = await import("@/lib/ai/codex-internal");
+    return handleCodexGenerationBridge(request);
+  }
+
   try {
-    const { id } = await params;
     const { supabase, user } = await requireUser();
     await assertRateLimit(user.id, "book-generate", 12, 3600);
 
