@@ -1,6 +1,10 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
-import { requireUser } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/client";
 
 type JobState = { status?: string; progress?: number; created_at?: string };
 type BookCard = {
@@ -17,7 +21,7 @@ type BookCard = {
 };
 
 function statusLabel(status: string, jobStatus?: string) {
-  if (jobStatus === "WAITING_LIMIT") return "무료 한도 대기";
+  if (jobStatus === "WAITING_LIMIT") return "AI 사용 한도 대기";
   if (jobStatus === "NEEDS_RECONNECT") return "AI 재연결 필요";
   if (jobStatus === "RETRYING") return "자동 재시도";
   if (status === "GENERATING") return "백그라운드 집필 중";
@@ -28,23 +32,45 @@ function statusLabel(status: string, jobStatus?: string) {
   return "초안";
 }
 
-export default async function DashboardPage() {
-  const { supabase } = await requireUser();
-  const { data } = await supabase
-    .from("books")
-    .select("id,title,subtitle,book_type,status,progress,target_pages,updated_at,cover:book_covers(concept),generation_jobs(status,progress,created_at)")
-    .order("updated_at", { ascending: false });
+export default function DashboardPage() {
+  const router = useRouter();
+  const [books, setBooks] = useState<BookCard[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  const books = (data ?? []).map((book) => {
-    const jobs = Array.isArray(book.generation_jobs) ? [...book.generation_jobs] : [];
-    jobs.sort((a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime());
-    const latestJob = jobs[0] ?? null;
-    return {
-      ...book,
-      cover: Array.isArray(book.cover) ? (book.cover[0]?.concept ?? null) : null,
-      latestJob
-    };
-  }) as BookCard[];
+  useEffect(() => {
+    let active = true;
+    const supabase = createClient();
+    void (async () => {
+      try {
+        const { data: userData } = await supabase.auth.getUser();
+        if (!userData.user) {
+          router.replace("/login?next=/dashboard");
+          return;
+        }
+        const { data, error: queryError } = await supabase
+          .from("books")
+          .select("id,title,subtitle,book_type,status,progress,target_pages,updated_at,cover:book_covers(concept),generation_jobs(status,progress,created_at)")
+          .order("updated_at", { ascending: false });
+        if (queryError) throw queryError;
+        const normalized = (data ?? []).map((book) => {
+          const jobs = Array.isArray(book.generation_jobs) ? [...book.generation_jobs] : [];
+          jobs.sort((a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime());
+          return {
+            ...book,
+            cover: Array.isArray(book.cover) ? (book.cover[0]?.concept ?? null) : null,
+            latestJob: jobs[0] ?? null
+          };
+        }) as BookCard[];
+        if (active) setBooks(normalized);
+      } catch (caught) {
+        if (active) setError(caught instanceof Error ? caught.message : "원고 목록을 불러오지 못했습니다.");
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [router]);
 
   const activeCount = books.filter((book) => !["COMPLETED", "CANCELLED"].includes(book.status)).length;
 
@@ -58,6 +84,9 @@ export default async function DashboardPage() {
         <Link className="button button-primary" href="/books/new">새 책 시작</Link>
       </section>
 
+      {loading ? <p className="muted">원고 작업실을 불러오는 중입니다…</p> : null}
+      {error ? <p className="notice" role="alert">{error}</p> : null}
+
       <section className="work-summary" aria-label="작업 요약">
         <div><strong>{books.length}</strong><span>전체 원고</span></div>
         <div><strong>{activeCount}</strong><span>진행 중</span></div>
@@ -65,7 +94,7 @@ export default async function DashboardPage() {
         <p>기획과 원고 생성은 서버에 작업 상태가 저장되어 화면을 나가도 백그라운드에서 이어집니다.</p>
       </section>
 
-      {books.length === 0 ? (
+      {!loading && books.length === 0 ? (
         <section className="empty-library">
           <div className="empty-sheet" aria-hidden="true"><span /><span /><span /><span /></div>
           <div>
@@ -74,7 +103,7 @@ export default async function DashboardPage() {
             <Link className="text-link" href="/books/new">첫 번째 책 설계하기</Link>
           </div>
         </section>
-      ) : (
+      ) : books.length > 0 ? (
         <section className="library-section">
           <div className="section-heading">
             <h2>Manuscript queue</h2>
@@ -86,7 +115,7 @@ export default async function DashboardPage() {
               const jobProgress = Number(book.latestJob?.progress ?? 0);
               const progress = Math.max(0, Math.min(100, book.status === "PLANNING" ? Math.max(storedProgress, jobProgress) : storedProgress));
               return (
-                <Link key={book.id} href={`/books/${book.id}`} className="manuscript-row">
+                <Link key={book.id} href={`/book?bookId=${encodeURIComponent(book.id)}`} className="manuscript-row">
                   <div className="book-spine" aria-hidden="true">
                     <span>{book.book_type}</span>
                     <strong>{book.title}</strong>
@@ -107,7 +136,7 @@ export default async function DashboardPage() {
             })}
           </div>
         </section>
-      )}
+      ) : null}
     </AppShell>
   );
 }
