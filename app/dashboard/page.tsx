@@ -69,7 +69,9 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const requestedView = new URL(window.location.href).searchParams.get("view");
-    if (requestedView === "generating" || requestedView === "completed") setView(requestedView);
+    const viewTimer = setTimeout(() => {
+      if (requestedView === "generating" || requestedView === "completed") setView(requestedView);
+    }, 0);
 
     let active = true;
     const supabase = createClient();
@@ -101,7 +103,7 @@ export default function DashboardPage() {
         if (active) setLoading(false);
       }
     })();
-    return () => { active = false; };
+    return () => { active = false; clearTimeout(viewTimer); };
   }, [router]);
 
   const activeCount = books.filter(isActive).length;
