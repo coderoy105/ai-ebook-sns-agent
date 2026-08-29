@@ -23,19 +23,21 @@ test("rejects content without parseable JSON", () => {
   assert.throws(() => parseOpenRouterJson("not json"), /FREE_AI_INVALID_JSON/);
 });
 
-test("keeps router attempts as a final degraded-output fallback", () => {
-  assert.deepEqual(OPENROUTER_FREE_ATTEMPTS.map((attempt) => attempt.model), [
-    "openrouter/free",
-    "openrouter/free",
-    "openrouter/free"
-  ]);
-  assert.deepEqual(OPENROUTER_FREE_ATTEMPTS.map((attempt) => attempt.mode), ["schema", "json", "plain"]);
+test("uses only one generic router call after discovered models", () => {
+  assert.deepEqual(OPENROUTER_FREE_ATTEMPTS, [{ model: "openrouter/free", mode: "plain" }]);
 });
 
-test("selects currently free text models and prefers structured output support", () => {
+test("selects free text models and prefers latency-oriented structured models", () => {
   const attempts = selectFreeModelAttempts([
     {
-      id: "provider/structured-free:free",
+      id: "provider/ultra-550b:free",
+      pricing: { prompt: "0", completion: "0", request: "0" },
+      supported_parameters: ["structured_outputs", "response_format"],
+      architecture: { output_modalities: ["text"] },
+      top_provider: { max_completion_tokens: 16000 }
+    },
+    {
+      id: "provider/lightning-32b:free",
       pricing: { prompt: "0", completion: "0", request: "0" },
       supported_parameters: ["structured_outputs", "response_format"],
       architecture: { output_modalities: ["text"] },
@@ -62,7 +64,8 @@ test("selects currently free text models and prefers structured output support",
     }
   ], "BookBlueprint");
 
-  assert.equal(attempts[0]?.model, "provider/structured-free:free");
+  assert.equal(attempts.length, 2);
+  assert.equal(attempts[0]?.model, "provider/lightning-32b:free");
   assert.equal(attempts[0]?.mode, "schema");
   assert.ok(attempts.some((attempt) => attempt.model === "provider/plain-free:free" && attempt.mode === "plain"));
   assert.ok(!attempts.some((attempt) => attempt.model === "provider/paid"));
