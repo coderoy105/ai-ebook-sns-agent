@@ -1,21 +1,47 @@
-export const bookBlueprintJsonSchema = {
+const titleCandidateJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["title","subtitle","style","reason","targetReaction"],
+  properties: {
+    title: { type: "string" },
+    subtitle: { type: "string" },
+    style: { type: "string" },
+    reason: { type: "string" },
+    targetReaction: { type: "string" }
+  }
+} as const;
+
+const sectionPlanJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["title","goal","targetWords","researchNeeded","layoutHint"],
+  properties: {
+    title: { type: "string" },
+    goal: { type: "string" },
+    targetWords: { type: "integer", minimum: 100 },
+    researchNeeded: { type: "boolean" },
+    layoutHint: { type: "string" }
+  }
+} as const;
+
+const chapterSkeletonJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["title","goal","targetWords","dependencies"],
+  properties: {
+    title: { type: "string" },
+    goal: { type: "string" },
+    targetWords: { type: "integer", minimum: 200 },
+    dependencies: { type: "array", items: { type: "string" } }
+  }
+} as const;
+
+export const bookBlueprintSkeletonJsonSchema = {
   type: "object",
   additionalProperties: false,
   required: ["titleCandidates","selectedTitle","selectedSubtitle","bookGoal","coreMessage","targetReader","readerBeforeState","readerAfterState","differentiation","expectedPages","expectedWords","bookType","templateRecommendations","parts","storyBible","knowledgeMap"],
   properties: {
-    titleCandidates: {
-      type: "array",
-      minItems: 5,
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["title","subtitle","style","reason","targetReaction"],
-        properties: {
-          title: { type: "string" }, subtitle: { type: "string" }, style: { type: "string" },
-          reason: { type: "string" }, targetReaction: { type: "string" }
-        }
-      }
-    },
+    titleCandidates: { type: "array", minItems: 5, maxItems: 7, items: titleCandidateJsonSchema },
     selectedTitle: { type: "string" },
     selectedSubtitle: { type: "string" },
     bookGoal: { type: "string" },
@@ -27,7 +53,41 @@ export const bookBlueprintJsonSchema = {
     expectedPages: { type: "integer", minimum: 1 },
     expectedWords: { type: "integer", minimum: 1000 },
     bookType: { type: "string" },
-    templateRecommendations: { type: "array", minItems: 1, items: { type: "string" } },
+    templateRecommendations: { type: "array", minItems: 1, maxItems: 3, items: { type: "string" } },
+    parts: {
+      type: "array",
+      minItems: 1,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["title","purpose","chapters"],
+        properties: {
+          title: { type: "string" },
+          purpose: { type: "string" },
+          chapters: { type: "array", minItems: 1, items: chapterSkeletonJsonSchema }
+        }
+      }
+    },
+    storyBible: { anyOf: [{ type: "object", additionalProperties: true }, { type: "null" }] },
+    knowledgeMap: { anyOf: [{ type: "object", additionalProperties: true }, { type: "null" }] }
+  }
+} as const;
+
+export const chapterSectionsJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["sections"],
+  properties: {
+    sections: { type: "array", minItems: 1, maxItems: 8, items: sectionPlanJsonSchema }
+  }
+} as const;
+
+export const bookBlueprintJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["titleCandidates","selectedTitle","selectedSubtitle","bookGoal","coreMessage","targetReader","readerBeforeState","readerAfterState","differentiation","expectedPages","expectedWords","bookType","templateRecommendations","parts","storyBible","knowledgeMap"],
+  properties: {
+    ...bookBlueprintSkeletonJsonSchema.properties,
     parts: {
       type: "array", minItems: 1,
       items: {
@@ -39,26 +99,14 @@ export const bookBlueprintJsonSchema = {
             items: {
               type: "object", additionalProperties: false, required: ["title","goal","targetWords","dependencies","sections"],
               properties: {
-                title: { type: "string" }, goal: { type: "string" }, targetWords: { type: "integer", minimum: 200 },
-                dependencies: { type: "array", items: { type: "string" } },
-                sections: {
-                  type: "array", minItems: 1,
-                  items: {
-                    type: "object", additionalProperties: false, required: ["title","goal","targetWords","researchNeeded","layoutHint"],
-                    properties: {
-                      title: { type: "string" }, goal: { type: "string" }, targetWords: { type: "integer", minimum: 100 },
-                      researchNeeded: { type: "boolean" }, layoutHint: { type: "string" }
-                    }
-                  }
-                }
+                ...chapterSkeletonJsonSchema.properties,
+                sections: { type: "array", minItems: 1, items: sectionPlanJsonSchema }
               }
             }
           }
         }
       }
-    },
-    storyBible: { anyOf: [{ type: "object", additionalProperties: true }, { type: "null" }] },
-    knowledgeMap: { anyOf: [{ type: "object", additionalProperties: true }, { type: "null" }] }
+    }
   }
 } as const;
 
