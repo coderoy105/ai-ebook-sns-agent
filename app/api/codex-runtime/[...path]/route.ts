@@ -22,11 +22,11 @@ const GenerateSchema = UserSchema.extend({
   timeoutMs: z.number().int().min(10000).max(240000).optional()
 });
 
-function describeError(value: unknown) {
+function describeError(value: unknown): string {
   if (typeof value === "string") return value.slice(0, 1600);
   if (value instanceof Error) {
-    const cause = value.cause == null ? "" : `:${describeError(value.cause)}`;
-    return `${value.message || value.name}${cause}`.slice(0, 1600);
+    const causeDetail: string = value.cause == null ? "" : `:${describeError(value.cause)}`;
+    return `${value.message || value.name}${causeDetail}`.slice(0, 1600);
   }
   try {
     const record = value as Record<string, unknown>;
