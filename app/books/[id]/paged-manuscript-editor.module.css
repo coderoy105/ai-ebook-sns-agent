@@ -1,0 +1,120 @@
+.stack {
+  width: min(820px, 100%);
+  margin: 0 auto;
+  display: grid;
+  gap: 30px;
+  position: relative;
+}
+
+.page {
+  width: 100%;
+  aspect-ratio: 210 / 297;
+  min-height: 0;
+  padding: clamp(24px, 7.1vw, 86px) clamp(22px, 7.5vw, 92px) clamp(32px, 9vw, 92px);
+  display: grid;
+  grid-template-rows: 22px minmax(0, 1fr) 20px;
+  gap: 14px;
+  overflow: hidden;
+  background: #fff;
+  color: #1b1e23;
+  box-shadow: 0 20px 44px rgba(31, 40, 54, .12);
+}
+
+.pageHeader,
+.pageFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #8a929d;
+  font-family: "Avenir Next", "Apple SD Gothic Neo", "Pretendard", "Segoe UI", sans-serif;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.pageHeader {
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e2e5e9;
+}
+
+.pageFooter {
+  padding-top: 8px;
+  border-top: 1px solid #e2e5e9;
+  font-variant-numeric: tabular-nums;
+}
+
+.editor,
+.measure {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #1b1e23;
+  font-family: "Iowan Old Style", "Apple SD Gothic Neo", Georgia, serif;
+  font-size: 17px;
+  line-height: 1.9;
+  letter-spacing: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.editor {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  resize: none;
+  overflow: hidden;
+  scrollbar-width: none;
+  caret-color: var(--accent);
+}
+
+.editor::-webkit-scrollbar {
+  display: none;
+}
+
+.editor:disabled {
+  opacity: .72;
+}
+
+.measure {
+  position: fixed;
+  left: -200vw;
+  top: 0;
+  height: 0;
+  min-height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+  resize: none;
+}
+
+@media (max-width: 900px) {
+  .stack { gap: 18px; }
+  .page {
+    padding: clamp(24px, 8vw, 56px) clamp(20px, 7vw, 36px) clamp(32px, 10vw, 70px);
+    gap: 10px;
+  }
+  .editor,
+  .measure {
+    font-size: 16px;
+    line-height: 1.8;
+  }
+}
+
+@media (max-width: 520px) {
+  .page {
+    padding: 26px 24px 34px;
+    grid-template-rows: 18px minmax(0, 1fr) 18px;
+  }
+  .pageHeader,
+  .pageFooter { font-size: 8px; }
+  .editor,
+  .measure {
+    font-size: 14px;
+    line-height: 1.72;
+  }
+}
