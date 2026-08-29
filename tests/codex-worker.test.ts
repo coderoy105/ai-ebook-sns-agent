@@ -7,7 +7,7 @@ test("Codex worker keeps Luna as a candidate that must be model/list verified", 
   assert.equal(CODEX_LUNA_MODEL, "gpt-5.6-luna");
 });
 
-test("Codex worker HMAC binds timestamp nonce method path and body", () => {
+test("Codex worker HMAC binds timestamp nonce method path and body", async () => {
   const secret = "0123456789abcdef0123456789abcdef";
   const timestamp = "1787990000000";
   const nonce = "11111111-2222-4333-8444-555555555555";
@@ -18,7 +18,7 @@ test("Codex worker HMAC binds timestamp nonce method path and body", () => {
   const canonical = `${timestamp}\n${nonce}\n${method}\n${path}\n${bodyHash}`;
   const signature = createHmac("sha256", secret).update(canonical).digest("hex");
 
-  assert.equal(verifyCodexWorkerSignatureForTest(secret, signature, timestamp, nonce, method, path, body), true);
-  assert.equal(verifyCodexWorkerSignatureForTest(secret, signature, timestamp, nonce, method, "/models", body), false);
-  assert.equal(verifyCodexWorkerSignatureForTest(secret, signature, timestamp, nonce, method, path, `${body}x`), false);
+  assert.equal(await verifyCodexWorkerSignatureForTest(secret, signature, timestamp, nonce, method, path, body), true);
+  assert.equal(await verifyCodexWorkerSignatureForTest(secret, signature, timestamp, nonce, method, "/models", body), false);
+  assert.equal(await verifyCodexWorkerSignatureForTest(secret, signature, timestamp, nonce, method, path, `${body}x`), false);
 });
