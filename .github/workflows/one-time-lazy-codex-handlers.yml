@@ -1,0 +1,38 @@
+name: One-time lazy Codex handlers
+
+on:
+  push:
+    paths:
+      - '.github/workflows/one-time-lazy-codex-handlers.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Lazy-load Sandbox-dependent API handlers
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('app/api/core/[...path]/route.ts')
+          s=p.read_text()
+          s=s.replace('''import {\n  handleEditorGET,\n  handleEditorPATCH,\n  handleEditorPOST,\n  handleEditorDELETE\n} from "@/lib/api/editor-handlers";\nimport {\n  handleAiConnectionGET,\n  handleAiConnectionPOST,\n  handleAiConnectionDELETE\n} from "@/lib/api/ai-connection-handlers";\n''','')
+          s=s.replace('  if (path[0] === "editor") return handleEditorGET(request, path.slice(1));','  if (path[0] === "editor") { const { handleEditorGET } = await import("@/lib/api/editor-handlers"); return handleEditorGET(request, path.slice(1)); }')
+          s=s.replace('  if (path[0] === "auth" && path[1] === "ai-connection") return handleAiConnectionGET(request);','  if (path[0] === "auth" && path[1] === "ai-connection") { const { handleAiConnectionGET } = await import("@/lib/api/ai-connection-handlers"); return handleAiConnectionGET(request); }')
+          s=s.replace('  if (path[0] === "editor") return handleEditorPOST(request, path.slice(1));','  if (path[0] === "editor") { const { handleEditorPOST } = await import("@/lib/api/editor-handlers"); return handleEditorPOST(request, path.slice(1)); }')
+          s=s.replace('  if (path[0] === "auth" && path[1] === "ai-connection") return handleAiConnectionPOST(request);','  if (path[0] === "auth" && path[1] === "ai-connection") { const { handleAiConnectionPOST } = await import("@/lib/api/ai-connection-handlers"); return handleAiConnectionPOST(request); }')
+          s=s.replace('  if (path[0] === "editor") return handleEditorPATCH(request, path.slice(1));','  if (path[0] === "editor") { const { handleEditorPATCH } = await import("@/lib/api/editor-handlers"); return handleEditorPATCH(request, path.slice(1)); }')
+          s=s.replace('  if (path[0] === "editor") return handleEditorDELETE(request, path.slice(1));','  if (path[0] === "editor") { const { handleEditorDELETE } = await import("@/lib/api/editor-handlers"); return handleEditorDELETE(request, path.slice(1)); }')
+          s=s.replace('  if (path[0] === "auth" && path[1] === "ai-connection") return handleAiConnectionDELETE(request);','  if (path[0] === "auth" && path[1] === "ai-connection") { const { handleAiConnectionDELETE } = await import("@/lib/api/ai-connection-handlers"); return handleAiConnectionDELETE(request); }')
+          p.write_text(s)
+          PY
+          git config user.name "AI Book Studio Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add app/api/core/'[...path]'/route.ts
+          git commit -m "fix: lazy-load Sandbox-dependent API handlers"
+          git push origin HEAD:main
