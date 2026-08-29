@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { beginFreeAiConnect, getFreeAiKey } from "@/lib/ai/openrouter-browser";
 import { connectCodexChatGPT, getCodexConnectionStatus, type CodexDeviceEvent } from "@/lib/ai/codex-browser";
+import { PagedManuscriptEditor } from "./paged-manuscript-editor";
 
 type Section = { id:string; title:string; goal:string|null; position:number; status:string; target_words:number; word_count:number; content_markdown:string|null; summary:string|null; layout_hint:string|null };
 type Chapter = { id:string; title:string; goal:string|null; position:number; status:string; target_words:number; word_count:number; sections:Section[] };
@@ -215,14 +216,24 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
 
   async function aiRewrite(){
     if(!selected||!command.trim())return;
-    const key=getFreeAiKey();
-    if(!key){await connectFreeAi();return;}
+    if(aiProvider==="codex" && !codexConnected){ await connectCodex(); return; }
+    const key=aiProvider==="openrouter"?getFreeAiKey():null;
+    if(aiProvider==="openrouter"&&!key){await connectFreeAi();return;}
     setBusy(true);
-    const r=await fetch(`/api/sections/${selected.id}/rewrite`,{method:"POST",headers:{"content-type":"application/json","x-openrouter-key":key},body:JSON.stringify({instruction:command})});
-    const data=await r.json(); setBusy(false);
-    if(!r.ok){alert(data.error==="FREE_AI_DAILY_LIMIT"?"오늘 무료 AI 한도에 도달했습니다. 다음 한도에서 다시 사용할 수 있습니다.":data.error??"Rewrite failed");return;}
-    clearSectionDraft(book.id,selected.id);
-    setContent(data.markdown);patchLocalSection(selected.id,{content_markdown:data.markdown,summary:data.summary});setSaveState("saved");setCommand("");void loadHistory();
+    const headers:Record<string,string>={"content-type":"application/json"};
+    if(key)headers["x-openrouter-key"]=key;
+    try{
+      const r=await fetch(`/api/sections/${selected.id}/rewrite`,{method:"POST",headers,body:JSON.stringify({instruction:command})});
+      const data=await r.json();
+      if(r.status===428||data.reconnect){await connectCurrentProvider();return;}
+      if(!r.ok){
+        const limit=data.error==="FREE_AI_DAILY_LIMIT"||data.error==="CODEX_USAGE_LIMIT";
+        alert(limit?`${providerLabel} 사용 한도에 도달했습니다. 한도가 초기화되면 다시 사용할 수 있습니다.`:data.error??"Rewrite failed");
+        return;
+      }
+      clearSectionDraft(book.id,selected.id);
+      setContent(data.markdown);patchLocalSection(selected.id,{content_markdown:data.markdown,summary:data.summary});setSaveState("saved");setCommand("");void loadHistory();
+    }finally{setBusy(false);}
   }
 
   async function loadHistory(){ if(!selected)return; const r=await fetch(`/api/sections/${selected.id}/revisions`); if(r.ok)setHistory((await r.json()).revisions??[]); }
@@ -270,7 +281,9 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
         <div><div className="editor-context"><span>{selected?.layout_hint??"MANUSCRIPT"}</span><span>{selected?.word_count ?? 0} words</span></div><h2>{selected?.title??"목차에서 Section을 선택하세요"}</h2></div>
         <span className={`save-state ${saveState}`}>{saveState === "saving" ? "서버 저장 중" : saveState === "dirty" ? "기기에 임시저장됨" : saveState === "recovered" ? "임시저장 복원됨" : saveState === "error" ? "서버 저장 오류 · 기기에는 보관됨" : "저장됨"}</span>
       </div>
-      <article className="page">{selected?<textarea aria-label="section manuscript" value={content} onChange={(e)=>changeContent(e.target.value)} placeholder="이 Section의 원고가 여기에 표시됩니다."/>:<p className="muted">왼쪽 목차에서 편집할 Section을 선택하세요.</p>}</article>
+      {selected
+        ? <PagedManuscriptEditor value={content} onChange={changeContent} placeholder="이 Section의 원고가 여기에 표시됩니다." />
+        : <article className="page"><p className="muted">왼쪽 목차에서 편집할 Section을 선택하세요.</p></article>}
     </main>
 
     <aside className="ai-panel">
