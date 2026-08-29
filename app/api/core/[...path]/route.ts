@@ -497,10 +497,6 @@ export async function GET(request: Request, { params }: { params: Promise<{ path
 export async function POST(request: Request, { params }: { params: Promise<{ path: string[] }> }) {
   const path = await pathOf(params);
   if (path[0] === "editor") { const { handleEditorPOST } = await import("@/lib/api/editor-handlers"); return handleEditorPOST(request, path.slice(1)); }
-  if (path[0] === "internal" && path[1] === "codex" && path[2] === "generate") {
-    const { handleCodexGenerationBridge } = await import("@/lib/ai/codex-internal");
-    return handleCodexGenerationBridge(request);
-  }
   if (path[0] === "auth" && path[1] === "ai-connection") { const { handleAiConnectionPOST } = await import("@/lib/api/ai-connection-handlers"); return handleAiConnectionPOST(request); }
   if (path[0] === "auth" && path[1] === "register") return handleRegister(request);
   if (path[0] === "auth" && path[1] === "openrouter-exchange") return handleOpenRouterExchange(request);
