@@ -6,7 +6,9 @@ ENV NODE_ENV=production \
 
 WORKDIR /app
 COPY package.json ./package.json
-RUN npm install --omit=dev --ignore-scripts=false && npm cache clean --force
+RUN npm install --omit=dev --ignore-scripts=false \
+    && node ./node_modules/@openai/codex/bin/codex.js --version \
+    && npm cache clean --force
 COPY server.mjs ./server.mjs
 RUN mkdir -p /data/codex-users && chown -R node:node /app /data
 
