@@ -375,11 +375,6 @@ async function handlePlanResume(request: Request, bookId: string) {
 }
 
 async function handleGenerate(request: Request, bookId: string) {
-  if (bookId === "codex" && request.headers.get("authorization")?.startsWith("Bearer ")) {
-    const { handleCodexGenerationBridge } = await import("@/lib/ai/codex-internal");
-    return handleCodexGenerationBridge(request);
-  }
-
   try {
     const { supabase, user } = await requireUser();
     await assertRateLimit(user.id, "book-generate", 12, 3600);
