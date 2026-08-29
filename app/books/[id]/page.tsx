@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/supabase/server";
-import { BookEditor } from "./book-editor";
+import { BookEditorShell } from "./book-editor-shell";
 import { GenerationProgress } from "./generation-progress";
 import type { Book } from "./book-editor";
 
@@ -16,7 +16,7 @@ export default async function BookPage({ params }: { params: Promise<{ id: strin
   `).eq("id", id).single();
   if (error || !book) notFound();
   return <>
-    <BookEditor initialBook={book as unknown as Book} />
+    <BookEditorShell initialBook={book as unknown as Book} />
     <GenerationProgress bookId={id} />
   </>;
 }
