@@ -1,0 +1,26 @@
+name: One-time global device code panel
+
+on:
+  push:
+    paths:
+      - '.github/workflows/one-time-global-device-panel.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - run: python .github/scripts/fix-global-device-panel.py
+      - name: Commit changes
+        run: |
+          git config user.name "AI Book Studio Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add app/books/new/book-wizard.tsx
+          git commit -m "fix: show ChatGPT device code on every wizard step"
+          git push origin HEAD:main
