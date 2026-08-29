@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { createClient } from "@/lib/supabase/client";
 
@@ -32,6 +33,7 @@ function statusLabel(status: string, jobStatus?: string) {
 }
 
 export default function DashboardPage() {
+  const router = useRouter();
   const [books, setBooks] = useState<BookCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -43,7 +45,7 @@ export default function DashboardPage() {
       try {
         const { data: userData } = await supabase.auth.getUser();
         if (!userData.user) {
-          location.assign("/login?next=/dashboard");
+          router.replace("/login?next=/dashboard");
           return;
         }
         const { data, error: queryError } = await supabase
@@ -68,7 +70,7 @@ export default function DashboardPage() {
       }
     })();
     return () => { active = false; };
-  }, []);
+  }, [router]);
 
   const activeCount = books.filter((book) => !["COMPLETED", "CANCELLED"].includes(book.status)).length;
 
