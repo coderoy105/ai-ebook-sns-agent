@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { verifyVercelOidcToken } from "@vercel/oidc";
 import { generateCodexWorkerStructured } from "@/lib/ai/codex-worker";
-import { SUPABASE_URL } from "@/lib/supabase/config";
 
 const Schema = z.object({
   userId: z.string().uuid(),
@@ -14,14 +14,10 @@ const Schema = z.object({
 
 async function assertProjectOidc(request: Request) {
   const authorization = request.headers.get("authorization") ?? "";
-  if (!authorization.startsWith("Bearer ")) throw new Error("INTERNAL_UNAUTHORIZED");
-  const response = await fetch(`${SUPABASE_URL}/functions/v1/ai-book-service`, {
-    method: "POST",
-    headers: { authorization, "content-type": "application/json" },
-    body: JSON.stringify({ kind: "health" }),
-    cache: "no-store"
-  });
-  if (!response.ok) throw new Error("INTERNAL_UNAUTHORIZED");
+  const token = authorization.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
+  if (!token) throw new Error("INTERNAL_UNAUTHORIZED");
+  try { await verifyVercelOidcToken(token); }
+  catch { throw new Error("INTERNAL_UNAUTHORIZED"); }
 }
 
 export async function handleCodexGenerationBridge(request: Request) {

@@ -10,7 +10,6 @@ import { generateFreeBlueprintWorkflow } from "@/lib/jobs/free-blueprint-workflo
 import { generateFreeBookWorkflow } from "@/lib/jobs/free-book-workflow";
 import {
   backgroundProviderLabel,
-  hasBackgroundCredential,
   normalizeBackgroundProvider
 } from "@/lib/ai/background-provider";
 import { collectBook, bookToMarkdown, stripMarkdown } from "@/lib/export/collect";
@@ -28,7 +27,6 @@ import {
   handleAiConnectionPOST,
   handleAiConnectionDELETE
 } from "@/lib/api/ai-connection-handlers";
-import { handleCodexGenerationBridge } from "@/lib/ai/codex-internal";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -130,6 +128,11 @@ async function saveOpenRouterKeyFromRequest(request: Request, userId: string) {
   const service = createServiceSupabase();
   const { error } = await service.rpc("store_openrouter_credential", { p_user_id: userId, p_secret: requestKey });
   if (error) throw new Error(error.message);
+}
+
+async function hasBackgroundCredential(userId: string, provider: "openrouter" | "codex") {
+  const module = await import("@/lib/ai/provider-connection");
+  return module.hasBackgroundCredential(userId, provider);
 }
 
 async function assertCodexReady(userId: string) {
@@ -505,7 +508,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ path
 export async function POST(request: Request, { params }: { params: Promise<{ path: string[] }> }) {
   const path = await pathOf(params);
   if (path[0] === "editor") return handleEditorPOST(request, path.slice(1));
-  if (path[0] === "internal" && path[1] === "codex" && path[2] === "generate") return handleCodexGenerationBridge(request);
+  if (path[0] === "internal" && path[1] === "codex" && path[2] === "generate") {
+    const { handleCodexGenerationBridge } = await import("@/lib/ai/codex-internal");
+    return handleCodexGenerationBridge(request);
+  }
   if (path[0] === "auth" && path[1] === "ai-connection") return handleAiConnectionPOST(request);
   if (path[0] === "auth" && path[1] === "register") return handleRegister(request);
   if (path[0] === "auth" && path[1] === "openrouter-exchange") return handleOpenRouterExchange(request);

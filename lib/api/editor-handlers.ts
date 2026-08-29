@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
-import { generateBackgroundStructured, hasBackgroundCredential, normalizeBackgroundProvider } from "@/lib/ai/background-provider";
+import { generateBackgroundStructured, normalizeBackgroundProvider } from "@/lib/ai/background-provider";
+import { hasBackgroundCredential } from "@/lib/ai/provider-connection";
 import { assertRateLimit } from "@/lib/security/rate-limit";
 
 const ControlSchema = z.object({ action: z.enum(["pause", "resume", "cancel"]) });
