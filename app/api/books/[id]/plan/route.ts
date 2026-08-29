@@ -4,6 +4,7 @@ import { start } from "workflow/api";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 import { generateFreeBlueprintWorkflow } from "@/lib/jobs/free-blueprint-workflow";
 import { assertRateLimit } from "@/lib/security/rate-limit";
+import { backgroundProviderLabel, hasBackgroundCredential, normalizeBackgroundProvider } from "@/lib/ai/background-provider";
 
 const PlanningInputSchema = z.object({
   idea: z.string().min(8).max(8000),
@@ -15,7 +16,8 @@ const PlanningInputSchema = z.object({
   targetPages: z.number().int().min(10).max(800),
   targetWords: z.number().int().positive(),
   templateMood: z.string().min(2).max(100),
-  mode: z.enum(["quick", "advanced"])
+  mode: z.enum(["quick", "advanced"]),
+  aiProvider: z.enum(["openrouter", "codex"]).default("openrouter")
 });
 
 const activePlanningStatuses = ["QUEUED", "PLANNING", "RETRYING", "WAITING_LIMIT"];
@@ -35,16 +37,34 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const settingsRelation = book.book_settings as unknown as { planning_input?: unknown } | Array<{ planning_input?: unknown }> | null;
     const settings = Array.isArray(settingsRelation) ? settingsRelation[0] : settingsRelation;
     const planningInput = PlanningInputSchema.parse(settings?.planning_input);
+    const provider = normalizeBackgroundProvider(planningInput.aiProvider);
 
     const service = createServiceSupabase();
-    const requestKey = request.headers.get("x-openrouter-key")?.trim();
-    if (requestKey && requestKey.length >= 16) {
-      const { error: saveError } = await service.rpc("store_openrouter_credential", { p_user_id: user.id, p_secret: requestKey });
-      if (saveError) throw new Error(saveError.message);
+    if (provider === "openrouter") {
+      const requestKey = request.headers.get("x-openrouter-key")?.trim();
+      if (requestKey && requestKey.length >= 16) {
+        const { error: saveError } = await service.rpc("store_openrouter_credential", { p_user_id: user.id, p_secret: requestKey });
+        if (saveError) throw new Error(saveError.message);
+      }
     }
-    const { data: connected, error: credentialError } = await service.rpc<boolean>("has_openrouter_credential", { p_user_id: user.id });
-    if (credentialError) throw new Error(credentialError.message);
-    if (connected !== true) return NextResponse.json({ error: "FREE_AI_CONNECTION_REQUIRED", reconnect: true }, { status: 428 });
+
+    const connected = await hasBackgroundCredential(user.id, provider);
+    if (!connected) {
+      return NextResponse.json({
+        error: provider === "codex" ? "CODEX_CONNECTION_REQUIRED" : "FREE_AI_CONNECTION_REQUIRED",
+        reconnect: true,
+        provider
+      }, { status: 428 });
+    }
+
+    if (provider === "codex") {
+      const { data: profile, error: profileError } = await service.from("codex_connection_profiles")
+        .select("model_available")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (profileError) throw new Error(profileError.message);
+      if (profile?.model_available === false) return NextResponse.json({ error: "CODEX_LUNA_UNAVAILABLE", provider }, { status: 409 });
+    }
 
     const { data: activeJobs } = await supabase.from("generation_jobs")
       .select("id,status,progress,workflow_run_id,created_at")
@@ -54,7 +74,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       .limit(1);
     const active = activeJobs?.[0];
     if (active?.workflow_run_id) {
-      return NextResponse.json({ jobId: active.id, runId: active.workflow_run_id, background: true, alreadyRunning: true });
+      return NextResponse.json({ jobId: active.id, runId: active.workflow_run_id, background: true, alreadyRunning: true, provider });
     }
 
     const { data: job, error: jobError } = await supabase.from("generation_jobs").insert({
@@ -68,12 +88,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     await supabase.from("books").update({ status: "PLANNING" }).eq("id", bookId);
     const run = await start(generateFreeBlueprintWorkflow, [{ bookId, userId: user.id, jobId: job.id, form: planningInput }]);
+    const providerLabel = backgroundProviderLabel(provider);
     await Promise.all([
       supabase.from("generation_jobs").update({ workflow_run_id: run.runId, status: "PLANNING" }).eq("id", job.id),
-      supabase.from("job_logs").insert({ generation_job_id: job.id, level: "info", message: "저장된 프로젝트에서 Book Blueprint 백그라운드 생성을 재개했습니다." })
+      supabase.from("job_logs").insert({ generation_job_id: job.id, level: "info", message: `저장된 프로젝트에서 ${providerLabel} Book Blueprint 백그라운드 생성을 재개했습니다.` })
     ]);
 
-    return NextResponse.json({ jobId: job.id, runId: run.runId, background: true, alreadyRunning: false });
+    return NextResponse.json({ jobId: job.id, runId: run.runId, background: true, alreadyRunning: false, provider });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Planning resume failed.";
     const status = message === "UNAUTHORIZED" ? 401 : message === "RATE_LIMITED" ? 429 : 400;
