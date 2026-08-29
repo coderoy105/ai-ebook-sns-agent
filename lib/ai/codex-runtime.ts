@@ -11,7 +11,7 @@ const require = createRequire(import.meta.url);
 type JsonObject = Record<string, unknown>;
 type RpcResponse = { id?: number | string; result?: unknown; error?: { message?: string } };
 type Notification = { method?: string; params?: unknown };
-type CodexEnv = Record<string, string> & { NODE_ENV: string };
+type CodexEnv = NodeJS.ProcessEnv & Record<string, string>;
 
 type Pending = {
   resolve: (value: unknown) => void;
@@ -27,10 +27,13 @@ type NotificationWaiter = {
 };
 
 function envWithCodexHome(codexHome: string): CodexEnv {
-  const env = { NODE_ENV: process.env.NODE_ENV ?? "production" } as CodexEnv;
+  const rawNodeEnv = process.env.NODE_ENV;
+  const nodeEnv = rawNodeEnv === "development" || rawNodeEnv === "test" || rawNodeEnv === "production" ? rawNodeEnv : "production";
+  const env = { NODE_ENV: nodeEnv } as CodexEnv;
   for (const [key, value] of Object.entries(process.env)) {
     if (typeof value === "string") env[key] = value;
   }
+  env.NODE_ENV = nodeEnv;
   env.CODEX_HOME = codexHome;
   env.NO_COLOR = "1";
   return env;
