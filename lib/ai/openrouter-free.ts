@@ -20,6 +20,20 @@ type OpenRouterPayload = {
   openrouter_metadata?: unknown;
 };
 
+type OpenRouterModel = {
+  id?: string;
+  context_length?: number;
+  expiration_date?: string | null;
+  pricing?: {
+    prompt?: string;
+    completion?: string;
+    request?: string;
+  };
+  supported_parameters?: string[];
+  architecture?: { output_modalities?: string[] };
+  top_provider?: { max_completion_tokens?: number | null };
+};
+
 type AttemptMode = "schema" | "json" | "plain";
 type AttemptPlan = { model: string; mode: AttemptMode };
 type FailedAttempt = {
@@ -34,16 +48,17 @@ type FailedAttempt = {
 
 export const OPENROUTER_FREE_MODEL = "openrouter/free";
 
-// Do not pin free provider model IDs here. Free endpoints and provider capability
-// combinations change frequently. The free router is designed to select from the
-// currently available zero-cost models, so we retry it while progressively
-// relaxing output-format requirements and validate the result locally.
+// Baseline fallback when model discovery itself is unavailable. The free router is
+// intentionally retried with progressively looser formatting requirements.
 export const OPENROUTER_FREE_ATTEMPTS: readonly AttemptPlan[] = [
-  { model: OPENROUTER_FREE_MODEL, mode: "schema" },
   { model: OPENROUTER_FREE_MODEL, mode: "schema" },
   { model: OPENROUTER_FREE_MODEL, mode: "json" },
   { model: OPENROUTER_FREE_MODEL, mode: "plain" }
 ] as const;
+
+let cachedFreeModels: { expiresAt: number; models: OpenRouterModel[] } | null = null;
+const MODEL_CACHE_MS = 5 * 60 * 1000;
+const MAX_DISCOVERED_ATTEMPTS = 4;
 
 export function normalizeOpenRouterContent(content: OpenRouterMessage["content"]): string {
   if (typeof content === "string") return content.trim();
@@ -95,6 +110,95 @@ function logFailedAttempt(attempt: FailedAttempt) {
   console.warn("[free-ai] OpenRouter attempt failed", attempt);
 }
 
+function isZeroPrice(value: string | undefined) {
+  if (value == null || value === "") return true;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric === 0;
+}
+
+function isCurrentlyAvailable(model: OpenRouterModel) {
+  if (!model.expiration_date) return true;
+  const expiresAt = Date.parse(model.expiration_date);
+  return Number.isNaN(expiresAt) || expiresAt > Date.now();
+}
+
+function supportsText(model: OpenRouterModel) {
+  const modalities = model.architecture?.output_modalities;
+  return !modalities || modalities.includes("text");
+}
+
+function isFreeModel(model: OpenRouterModel) {
+  return Boolean(model.id) &&
+    isZeroPrice(model.pricing?.prompt) &&
+    isZeroPrice(model.pricing?.completion) &&
+    isZeroPrice(model.pricing?.request) &&
+    supportsText(model) &&
+    isCurrentlyAvailable(model);
+}
+
+function supportsStructuredOutput(model: OpenRouterModel) {
+  const parameters = model.supported_parameters ?? [];
+  return parameters.includes("structured_outputs") || parameters.includes("response_format");
+}
+
+export function selectFreeModelAttempts(models: OpenRouterModel[], schemaName: string): AttemptPlan[] {
+  const budget = outputBudget(schemaName);
+  const candidates = models.filter(isFreeModel);
+  const roomy = candidates.filter((model) => {
+    const max = model.top_provider?.max_completion_tokens;
+    return !max || max >= Math.min(budget, 7000);
+  });
+  const pool = roomy.length >= 2 ? roomy : candidates;
+  const attempts: AttemptPlan[] = [];
+  const used = new Set<string>();
+
+  for (const model of pool) {
+    if (!supportsStructuredOutput(model) || !model.id || used.has(model.id)) continue;
+    attempts.push({ model: model.id, mode: "schema" });
+    used.add(model.id);
+    if (attempts.length >= 2) break;
+  }
+
+  for (const model of pool) {
+    if (!model.id || used.has(model.id)) continue;
+    attempts.push({ model: model.id, mode: "plain" });
+    used.add(model.id);
+    if (attempts.length >= MAX_DISCOVERED_ATTEMPTS) break;
+  }
+
+  // If the only good current model already appeared in schema mode, retry it once
+  // without capability constraints before falling back to the router.
+  if (attempts.length < MAX_DISCOVERED_ATTEMPTS && attempts[0]?.model) {
+    attempts.push({ model: attempts[0].model, mode: "plain" });
+  }
+
+  return attempts.slice(0, MAX_DISCOVERED_ATTEMPTS);
+}
+
+async function discoverFreeModels(apiKey: string, signal?: AbortSignal): Promise<OpenRouterModel[]> {
+  if (cachedFreeModels && cachedFreeModels.expiresAt > Date.now()) return cachedFreeModels.models;
+
+  try {
+    const response = await fetch("https://openrouter.ai/api/v1/models?output_modalities=text&sort=most-popular", {
+      headers: { authorization: `Bearer ${apiKey}` },
+      signal
+    });
+    if (!response.ok) {
+      console.warn("[free-ai] model discovery failed", { status: response.status });
+      return [];
+    }
+    const payload = await response.json() as { data?: OpenRouterModel[] };
+    const models = Array.isArray(payload.data) ? payload.data.filter(isFreeModel) : [];
+    cachedFreeModels = { expiresAt: Date.now() + MODEL_CACHE_MS, models };
+    console.info("[free-ai] discovered current free models", { count: models.length, sample: models.slice(0, 5).map((model) => model.id) });
+    return models;
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    console.warn("[free-ai] model discovery unavailable");
+    return [];
+  }
+}
+
 function jsonOnlyInstruction<T>(request: StructuredRequest<T>) {
   return [
     request.system,
@@ -143,9 +247,15 @@ export class OpenRouterFreeProvider implements LlmProvider {
   async generateStructured<T>(request: StructuredRequest<T>): Promise<StructuredResponse<T>> {
     const started = Date.now();
     let rateLimitedAttempts = 0;
+    let totalAttempts = 0;
     let lastFailure = "FREE_AI_TEMPORARILY_UNAVAILABLE";
 
-    for (const attempt of OPENROUTER_FREE_ATTEMPTS) {
+    const discovered = await discoverFreeModels(this.apiKey, request.signal);
+    const liveAttempts = selectFreeModelAttempts(discovered, request.schemaName);
+    const attempts = [...liveAttempts, ...OPENROUTER_FREE_ATTEMPTS];
+
+    for (const attempt of attempts) {
+      totalAttempts += 1;
       let response: Response;
       try {
         response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -243,7 +353,7 @@ export class OpenRouterFreeProvider implements LlmProvider {
       };
     }
 
-    if (rateLimitedAttempts === OPENROUTER_FREE_ATTEMPTS.length) throw new Error("FREE_AI_DAILY_LIMIT");
+    if (totalAttempts > 0 && rateLimitedAttempts === totalAttempts) throw new Error("FREE_AI_DAILY_LIMIT");
     throw new Error(lastFailure === "FREE_AI_DAILY_LIMIT" ? "FREE_AI_TEMPORARILY_UNAVAILABLE" : lastFailure);
   }
 
