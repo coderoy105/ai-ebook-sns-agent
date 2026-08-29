@@ -1,0 +1,1062 @@
+/*
+ * AI Book Studio — Cohesive Product UI v2
+ *
+ * This layer intentionally overrides the first Editorial OS pass. The goal is
+ * a single product language across library, creation, and manuscript editing,
+ * with the manuscript taking priority on small screens.
+ */
+
+:root {
+  --canvas: #f5f5f2;
+  --surface: #ffffff;
+  --surface-subtle: #f9f9f7;
+  --paper: #ffffff;
+  --ink: #161713;
+  --ink-soft: #3f423b;
+  --muted: #777c72;
+  --muted-strong: #5d6259;
+  --line: #e2e4de;
+  --line-strong: #cdd1c8;
+  --accent: #2f55e7;
+  --accent-strong: #1f42c8;
+  --accent-soft: #edf1ff;
+  --success: #187453;
+  --warning: #91600a;
+  --danger: #b13a30;
+  --sidebar: #fafaf8;
+  --sidebar-soft: #f2f3ef;
+  --sidebar-line: #e1e3dc;
+  --sidebar-muted: #7b8177;
+  --shadow-paper: 0 24px 64px rgba(32, 35, 28, 0.11), 0 3px 12px rgba(32, 35, 28, 0.07);
+  --shadow-dock: 0 18px 48px rgba(24, 26, 21, 0.22);
+}
+
+body {
+  background: var(--canvas);
+}
+
+.page-eyebrow {
+  display: block;
+  margin-bottom: 9px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 760;
+  line-height: 1;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+/* ---------- shared application chrome ---------- */
+
+.shell {
+  grid-template-columns: 224px minmax(0, 1fr);
+}
+
+.sidebar {
+  background: rgba(250, 250, 248, 0.96);
+  color: var(--ink);
+  border-right-color: var(--sidebar-line);
+  padding: 28px 18px 20px;
+  backdrop-filter: blur(18px);
+}
+
+.sidebar .product-mark,
+.sidebar .product-mark-copy strong {
+  color: var(--ink);
+}
+
+.sidebar .product-mark-copy small,
+.sidebar-note small {
+  color: var(--muted);
+}
+
+.nav {
+  margin-top: 48px;
+  gap: 5px;
+}
+
+.nav a {
+  min-height: 54px;
+  color: var(--muted-strong);
+  border: 1px solid transparent;
+  border-radius: 9px;
+  padding: 10px 11px 10px 14px;
+}
+
+.nav a::before {
+  display: none;
+}
+
+.nav a:hover {
+  color: var(--ink);
+  background: #f2f3ef;
+}
+
+.nav a.active {
+  color: var(--ink);
+  background: #ffffff;
+  border-color: var(--line);
+  box-shadow: 0 1px 3px rgba(24, 26, 21, 0.05);
+}
+
+.nav a.active span {
+  color: var(--accent);
+}
+
+.nav a span {
+  font-size: 13px;
+}
+
+.nav a small {
+  color: #92978e;
+  font-size: 9px;
+}
+
+.sidebar-note {
+  border-top-color: var(--line);
+  color: var(--muted);
+}
+
+.sidebar-note strong {
+  color: var(--ink-soft);
+}
+
+.sidebar-create {
+  color: var(--accent);
+}
+
+.sidebar-create:hover {
+  color: var(--accent-strong);
+}
+
+.mobile-appbar {
+  display: none;
+}
+
+.main {
+  padding: 46px clamp(28px, 4.5vw, 68px) 88px;
+}
+
+.button {
+  border-color: var(--line-strong);
+  background: #fff;
+  min-height: 44px;
+  border-radius: 9px;
+  font-size: 12px;
+  letter-spacing: -0.005em;
+}
+
+.button:hover:not(:disabled) {
+  background: #fafaf8;
+  border-color: #adb3a8;
+  transform: none;
+}
+
+.button-primary,
+.button.button-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.button-primary:hover:not(:disabled),
+.button.button-primary:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+/* ---------- dashboard ---------- */
+
+.dashboard-head {
+  max-width: 1160px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 40px;
+  align-items: end;
+  padding-bottom: 30px;
+  border-bottom-color: var(--line-strong);
+}
+
+.dashboard-title-block h1 {
+  max-width: none;
+  margin: 0 0 12px;
+  font-size: clamp(2.75rem, 5vw, 4.25rem);
+  line-height: 0.99;
+  letter-spacing: -0.055em;
+}
+
+.dashboard-title-block p {
+  max-width: 54ch;
+  color: var(--muted-strong);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.dashboard-head-actions {
+  gap: 8px;
+  justify-items: end;
+}
+
+.dashboard-head-actions > span {
+  font-size: 9px;
+}
+
+.work-summary {
+  max-width: 1160px;
+  grid-template-columns: 108px 108px 108px minmax(240px, 1fr);
+  border-bottom-color: var(--line);
+}
+
+.work-summary > div {
+  padding: 20px 16px 20px 0;
+}
+
+.work-summary > div + div,
+.work-summary p {
+  border-color: var(--line);
+}
+
+.work-summary strong {
+  font-size: 26px;
+  font-weight: 690;
+}
+
+.work-summary span,
+.work-summary p {
+  font-size: 10px;
+}
+
+.library-section {
+  max-width: 1160px;
+  margin-top: 44px;
+}
+
+.section-heading {
+  margin-bottom: 12px;
+}
+
+.section-heading h2 {
+  font-size: 22px;
+}
+
+.library-tabs {
+  border-color: var(--line);
+  background: #efefec;
+}
+
+.library-tabs button {
+  min-height: 32px;
+  font-size: 10px;
+}
+
+.manuscript-list {
+  border-top-color: var(--line-strong);
+}
+
+.manuscript-row {
+  grid-template-columns: 30px 62px minmax(240px, 1fr) minmax(150px, 0.34fr) 18px;
+  gap: 18px;
+  min-height: 108px;
+  border-bottom-color: var(--line);
+  padding: 15px 0;
+}
+
+.manuscript-row:hover {
+  background: rgba(255, 255, 255, 0.7);
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+.book-spine {
+  width: 62px;
+  height: 78px;
+  background: #252720;
+  border-radius: 4px 8px 8px 4px;
+  box-shadow: inset 4px 0 rgba(255, 255, 255, 0.07);
+}
+
+.manuscript-copy strong {
+  font-size: 17px;
+}
+
+.manuscript-copy p {
+  margin: 4px 0 8px;
+  font-size: 12px;
+}
+
+.manuscript-copy > span,
+.manuscript-progress small,
+.manuscript-state {
+  font-size: 9px;
+}
+
+/* ---------- creation wizard ---------- */
+
+.wizard-shell {
+  max-width: 1180px;
+  grid-template-columns: 198px minmax(0, 1fr);
+  gap: 26px;
+}
+
+.wizard-rail {
+  border-right-color: var(--line);
+  padding-right: 24px;
+}
+
+.wizard-stage {
+  border-color: var(--line-strong);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 2px 9px rgba(24, 26, 21, 0.035);
+}
+
+.wizard-header {
+  border-bottom-color: var(--line);
+  min-height: 112px;
+  padding: 26px 30px 23px;
+}
+
+.wizard-header h1 {
+  font-size: 30px;
+}
+
+.wizard-workspace {
+  padding: 30px;
+}
+
+.wizard-actions {
+  margin: 30px -30px -30px;
+  padding: 14px 30px calc(14px + env(safe-area-inset-bottom));
+  border-top-color: var(--line);
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(16px);
+}
+
+.choice-tile.active {
+  background: #20221d;
+}
+
+.idea-field textarea {
+  border-color: var(--line-strong);
+  font-size: 19px;
+  min-height: 230px;
+}
+
+.codex-usage-strip {
+  border-color: var(--line);
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(24, 26, 21, 0.035);
+}
+
+/* ---------- editor: desktop ---------- */
+
+.editor-shell {
+  background: #f0f1ed;
+  grid-template-columns: 254px minmax(0, 1fr) 316px;
+}
+
+.editor-sidebar {
+  background: #fafaf8;
+  color: var(--ink);
+  border-right: 1px solid var(--line);
+  padding: 22px 16px 30px;
+}
+
+.editor-brand {
+  color: var(--ink);
+}
+
+.editor-brand span {
+  color: var(--muted);
+}
+
+.editor-brand strong {
+  color: var(--ink);
+}
+
+.manuscript-identity {
+  border-bottom-color: var(--line);
+  margin: 26px 0 18px;
+  padding-bottom: 18px;
+}
+
+.manuscript-identity > span {
+  color: var(--muted);
+}
+
+.manuscript-identity > strong {
+  color: var(--ink);
+}
+
+.manuscript-identity p,
+.outline-help {
+  color: var(--muted);
+}
+
+.tree .part {
+  color: #878d83;
+}
+
+.chapter-label {
+  color: var(--ink-soft);
+}
+
+.tree .outline-row > button:first-child {
+  color: #686e65;
+}
+
+.tree .outline-row > button:first-child:hover {
+  color: var(--ink);
+  background: #f0f1ed;
+}
+
+.tree .outline-row > button:first-child.active {
+  color: #1f3eb8;
+  background: var(--accent-soft);
+}
+
+.tree .outline-row > button:first-child.active small {
+  color: #5d6fae;
+}
+
+.tree .outline-row > button:first-child > small {
+  color: #9aa097;
+}
+
+.mini {
+  color: #8c9288;
+}
+
+.mini:hover {
+  color: var(--ink);
+  background: #eceee9;
+}
+
+.ai-panel {
+  background: #fbfbf9;
+  border-left-color: var(--line);
+}
+
+.editor-canvas {
+  padding-top: 24px;
+}
+
+.editor-topbar {
+  max-width: 800px;
+  margin-bottom: 14px;
+}
+
+.editor-topbar h2 {
+  font-size: 21px;
+}
+
+.editor-context {
+  color: var(--muted);
+}
+
+.page {
+  max-width: 800px;
+  min-height: 1080px;
+  box-shadow: var(--shadow-paper);
+  border: 1px solid #e3e5df;
+}
+
+.page textarea {
+  font-size: 17px;
+  line-height: 1.92;
+}
+
+.mobile-sheet-head,
+.editor-mobile-header,
+.editor-mobile-scrim,
+.editor-mobile-dock {
+  display: none;
+}
+
+/* purposeful Magic UI-style motion: only active generation state receives a subtle sheen */
+.generation-dock .dock-track span,
+.generation-module .progress-track > span {
+  position: relative;
+  overflow: hidden;
+}
+
+.generation-dock .dock-track span::after,
+.generation-module .progress-track > span::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 38%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.32), transparent);
+  transform: translateX(-140%);
+  animation: generationSheen 2.8s ease-in-out infinite;
+}
+
+@keyframes generationSheen {
+  0%, 38% { transform: translateX(-140%); }
+  72%, 100% { transform: translateX(340%); }
+}
+
+/* ---------- mobile product shell ---------- */
+
+@media (max-width: 900px) {
+  body {
+    padding-bottom: calc(66px + env(safe-area-inset-bottom));
+  }
+
+  .shell {
+    display: block;
+    min-height: 100dvh;
+  }
+
+  .mobile-appbar {
+    z-index: 70;
+    display: flex;
+    position: sticky;
+    top: 0;
+    height: 58px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 0 16px;
+    background: rgba(250, 250, 248, 0.94);
+    border-bottom: 1px solid var(--line);
+    backdrop-filter: blur(18px);
+  }
+
+  .mobile-appbar .product-mark-symbol {
+    width: 20px;
+    height: 24px;
+  }
+
+  .mobile-appbar .product-mark-copy strong {
+    font-size: 12px;
+  }
+
+  .mobile-appbar-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 36px;
+    padding: 0 10px;
+    color: var(--accent);
+    border: 1px solid #ced5f5;
+    border-radius: 8px;
+    background: #f6f8ff;
+    font-size: 11px;
+    font-weight: 760;
+  }
+
+  .sidebar {
+    inset: auto 0 0;
+    height: calc(64px + env(safe-area-inset-bottom));
+    padding: 0 10px env(safe-area-inset-bottom);
+    background: rgba(252, 252, 250, 0.98);
+    border-top: 1px solid var(--line);
+    border-right: 0;
+    box-shadow: 0 -8px 28px rgba(24, 26, 21, 0.06);
+    backdrop-filter: blur(20px);
+  }
+
+  .nav {
+    margin: 0;
+    height: 64px;
+  }
+
+  .nav a {
+    min-height: 60px;
+    color: #737970;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    padding: 8px 4px 7px;
+  }
+
+  .nav a:hover,
+  .nav a.active {
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+  }
+
+  .nav a.active {
+    color: var(--ink);
+  }
+
+  .nav a.active::after {
+    content: "";
+    position: absolute;
+    left: 30%;
+    right: 30%;
+    bottom: 3px;
+    height: 2px;
+    border-radius: 999px;
+    background: var(--accent);
+  }
+
+  .nav a span {
+    font-size: 11px;
+  }
+
+  .nav a small {
+    font-size: 7px;
+  }
+
+  .main {
+    padding: 24px 16px 52px;
+  }
+
+  .dashboard-head {
+    grid-template-columns: 1fr;
+    gap: 24px;
+    padding-bottom: 26px;
+  }
+
+  .dashboard-title-block h1 {
+    margin-bottom: 10px;
+    font-size: clamp(2.25rem, 10vw, 3rem);
+  }
+
+  .dashboard-title-block p {
+    max-width: 42ch;
+    font-size: 13px;
+  }
+
+  .dashboard-head-actions {
+    justify-items: start;
+  }
+
+  .work-summary {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .work-summary > div {
+    padding: 17px 10px 17px 0;
+  }
+
+  .work-summary > div + div {
+    padding-left: 10px;
+  }
+
+  .work-summary p {
+    grid-column: 1 / -1;
+    padding: 14px 0;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .library-section {
+    margin-top: 34px;
+  }
+
+  .manuscript-row {
+    grid-template-columns: 54px minmax(0, 1fr) 16px;
+    gap: 12px;
+    min-height: 108px;
+    padding: 15px 0;
+  }
+
+  .manuscript-index {
+    display: none;
+  }
+
+  .book-spine {
+    grid-column: 1;
+    width: 54px;
+    height: 72px;
+  }
+
+  .manuscript-copy {
+    grid-column: 2;
+  }
+
+  .row-arrow {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .manuscript-progress {
+    grid-column: 2 / 4;
+  }
+
+  .manuscript-copy strong {
+    font-size: 15px;
+  }
+
+  /* Book creation feels like the same app instead of a separate framed tool. */
+  .wizard-shell {
+    display: block;
+  }
+
+  .wizard-rail {
+    margin: -24px -16px 14px;
+    padding: 8px 16px;
+    background: rgba(245, 245, 242, 0.96);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .wizard-stage {
+    border-radius: 11px;
+    border-color: var(--line);
+  }
+
+  .wizard-header,
+  .wizard-workspace {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+
+  .wizard-header h1 {
+    font-size: 26px;
+  }
+
+  .wizard-actions {
+    bottom: calc(64px + env(safe-area-inset-bottom));
+    margin-left: -20px;
+    margin-right: -20px;
+    margin-bottom: -30px;
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+
+  /* Manuscript editor: mobile is a manuscript-first product, not stacked desktop rails. */
+  .manuscript-editor-shell {
+    display: block;
+    min-height: 100dvh;
+    padding-top: 56px;
+    padding-bottom: calc(76px + env(safe-area-inset-bottom));
+    background: #efefec;
+  }
+
+  .manuscript-editor-shell .editor-mobile-header {
+    z-index: 88;
+    display: grid;
+    position: fixed;
+    inset: 0 0 auto;
+    grid-template-columns: 42px minmax(0, 1fr) 42px;
+    align-items: center;
+    gap: 8px;
+    min-height: 56px;
+    padding: 6px 10px;
+    background: rgba(252, 252, 250, 0.96);
+    border-bottom: 1px solid var(--line);
+    backdrop-filter: blur(18px);
+  }
+
+  .editor-mobile-back,
+  .editor-mobile-action {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--ink);
+    font-size: 12px;
+    font-weight: 760;
+  }
+
+  .editor-mobile-back:hover,
+  .editor-mobile-action:hover {
+    background: #f0f1ed;
+  }
+
+  .editor-mobile-title {
+    min-width: 0;
+    text-align: center;
+  }
+
+  .editor-mobile-title span,
+  .editor-mobile-title strong {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .editor-mobile-title span {
+    color: var(--muted);
+    font-size: 8px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .editor-mobile-title strong {
+    margin-top: 1px;
+    font-size: 12px;
+  }
+
+  .manuscript-editor-shell .editor-canvas {
+    width: 100%;
+    padding: 14px 10px 28px;
+  }
+
+  .manuscript-editor-shell .editor-topbar {
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+    width: 100%;
+    margin: 0 auto 10px;
+    padding: 0 4px;
+  }
+
+  .manuscript-editor-shell .editor-topbar > div {
+    min-width: 0;
+  }
+
+  .manuscript-editor-shell .editor-topbar h2 {
+    overflow: hidden;
+    margin: 4px 0 0;
+    font-size: 19px;
+    line-height: 1.15;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .manuscript-editor-shell .editor-context {
+    gap: 6px;
+    font-size: 7px;
+  }
+
+  .manuscript-editor-shell .save-state {
+    flex: none;
+    padding: 4px 7px;
+    font-size: 7px;
+  }
+
+  .manuscript-editor-shell .page {
+    width: 100%;
+    max-width: none;
+    min-height: min(760px, calc(100dvh - 150px));
+    margin: 0;
+    padding: 52px 28px 72px;
+    border-radius: 1px;
+    box-shadow: 0 14px 42px rgba(32, 35, 28, 0.1);
+  }
+
+  .manuscript-editor-shell .page textarea {
+    min-height: 620px;
+    font-size: 16px;
+    line-height: 1.85;
+  }
+
+  .manuscript-editor-shell .editor-sidebar,
+  .manuscript-editor-shell .ai-panel {
+    z-index: 110;
+    position: fixed;
+    inset: auto 8px calc(70px + env(safe-area-inset-bottom));
+    width: auto;
+    height: auto;
+    max-height: min(76dvh, 720px);
+    overflow: auto;
+    transform: translateY(calc(100% + 100px));
+    transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+    border: 1px solid var(--line-strong);
+    border-radius: 18px 18px 12px 12px;
+    background: #fcfcfa;
+    box-shadow: 0 28px 70px rgba(19, 21, 17, 0.24);
+  }
+
+  .manuscript-editor-shell .editor-sidebar {
+    padding: 0 16px 24px;
+  }
+
+  .manuscript-editor-shell .ai-panel {
+    padding: 0 18px 24px;
+    border-left: 1px solid var(--line-strong);
+  }
+
+  .manuscript-editor-shell .editor-sidebar.mobile-open,
+  .manuscript-editor-shell .ai-panel.mobile-open {
+    transform: translateY(0);
+  }
+
+  .mobile-sheet-head {
+    z-index: 2;
+    display: flex;
+    position: sticky;
+    top: 0;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 54px;
+    margin: 0 -16px 12px;
+    padding: 0 16px;
+    background: rgba(252, 252, 250, 0.97);
+    border-bottom: 1px solid var(--line);
+    backdrop-filter: blur(16px);
+  }
+
+  .ai-panel .mobile-sheet-head {
+    margin-left: -18px;
+    margin-right: -18px;
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+
+  .mobile-sheet-head strong {
+    font-size: 13px;
+  }
+
+  .mobile-sheet-head button {
+    min-width: 38px;
+    min-height: 38px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--muted-strong);
+    font-size: 11px;
+  }
+
+  .manuscript-editor-shell .editor-brand {
+    display: none;
+  }
+
+  .manuscript-editor-shell .manuscript-identity {
+    margin: 8px 0 14px;
+    padding-bottom: 14px;
+  }
+
+  .manuscript-editor-shell .manuscript-identity p {
+    display: block;
+  }
+
+  .manuscript-editor-shell .tree {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .manuscript-editor-shell .outline-help {
+    display: block;
+  }
+
+  .editor-mobile-scrim {
+    z-index: 100;
+    display: block;
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    background: rgba(17, 18, 15, 0.32);
+    backdrop-filter: blur(2px);
+  }
+
+  .editor-mobile-dock {
+    z-index: 92;
+    display: grid;
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+    height: 58px;
+    padding: 4px;
+    border: 1px solid #d8dbd4;
+    border-radius: 15px;
+    background: rgba(252, 252, 250, 0.97);
+    box-shadow: 0 12px 34px rgba(24, 26, 21, 0.15);
+    backdrop-filter: blur(18px);
+  }
+
+  .editor-mobile-dock button {
+    min-width: 0;
+    border: 0;
+    border-radius: 11px;
+    background: transparent;
+    color: #696f66;
+    font-size: 10px;
+    font-weight: 720;
+  }
+
+  .editor-mobile-dock button.current {
+    background: #eef1ff;
+    color: var(--accent);
+  }
+
+  .editor-mobile-dock button[aria-expanded="true"] {
+    background: #f0f1ed;
+    color: var(--ink);
+  }
+
+  /* Planning is temporary: keep it compact instead of showing a giant dark rail. */
+  .planning-editor-shell {
+    grid-template-columns: 1fr;
+    grid-template-areas: "canvas" "tools";
+  }
+
+  .planning-editor-shell .editor-sidebar {
+    display: none;
+  }
+
+  .planning-editor-shell .editor-canvas,
+  .planning-editor-shell .ai-panel {
+    width: 100%;
+    height: auto;
+    position: relative;
+    inset: auto;
+  }
+
+  .planning-editor-shell .editor-canvas {
+    padding: 22px 16px 18px;
+  }
+
+  .planning-editor-shell .ai-panel {
+    border-top: 1px solid var(--line);
+    border-left: 0;
+    padding: 0 18px 90px;
+  }
+}
+
+@media (max-width: 620px) {
+  .main {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .dashboard-title-block h1 {
+    font-size: 2.35rem;
+  }
+
+  .dashboard-head-actions .button {
+    width: 100%;
+  }
+
+  .section-heading {
+    align-items: stretch;
+    gap: 14px;
+  }
+
+  .library-tabs {
+    width: 100%;
+  }
+
+  .library-tabs button {
+    flex: 1;
+  }
+
+  .manuscript-editor-shell .editor-topbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .manuscript-editor-shell .page {
+    padding: 44px 24px 64px;
+  }
+
+  .manuscript-editor-shell .page textarea {
+    font-size: 15.5px;
+    line-height: 1.82;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .generation-dock .dock-track span::after,
+  .generation-module .progress-track > span::after {
+    display: none;
+  }
+
+  .manuscript-editor-shell .editor-sidebar,
+  .manuscript-editor-shell .ai-panel {
+    transition: none;
+  }
+}
