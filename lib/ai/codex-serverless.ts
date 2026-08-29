@@ -9,8 +9,43 @@ import { createServiceSupabase } from "@/lib/supabase/server";
 export const SERVERLESS_CODEX_MODEL = "gpt-5.6-luna";
 const require = createRequire(import.meta.url);
 
-type JsonRpcMessage = { id?: string | number; method?: string; params?: any; result?: any; error?: { message?: string } };
-type Pending = { resolve: (value: any) => void; reject: (error: Error) => void; timer: NodeJS.Timeout };
+type JsonRpcMessage = {
+  id?: string | number;
+  method?: string;
+  params?: unknown;
+  result?: unknown;
+  error?: { message?: string };
+};
+
+type Pending = {
+  resolve: (value: unknown) => void;
+  reject: (error: Error) => void;
+  timer: NodeJS.Timeout;
+};
+
+type CodexAccount = {
+  type?: string;
+  email?: string | null;
+  planType?: string | null;
+};
+
+type AccountReadResult = { account?: CodexAccount | null };
+type ModelItem = { id?: string; model?: string };
+type ModelListResult = { data?: ModelItem[] };
+type ThreadStartResult = { thread?: { id?: string } };
+type TurnStartResult = { turn?: { id?: string } };
+type TurnItem = { type?: string; text?: string };
+type TurnShape = { id?: string; status?: string; error?: unknown; items?: TurnItem[] };
+type TurnEventParams = {
+  threadId?: string;
+  turnId?: string;
+  turn?: TurnShape;
+  delta?: string;
+  tokenUsage?: { last?: { inputTokens?: number; outputTokens?: number } };
+};
+type TurnTerminal = { ok: boolean; params: TurnEventParams };
+type LoginStartResult = { loginId?: string; verificationUrl?: string; userCode?: string };
+type LoginCompletedParams = { loginId?: string; success?: boolean };
 
 export type ServerlessCodexStatus = {
   connected: boolean;
@@ -68,7 +103,9 @@ class AppServerClient {
       else pending.resolve(message.result);
       return;
     }
-    if (typeof message.method === "string") for (const listener of this.listeners) listener(message);
+    if (typeof message.method === "string") {
+      for (const listener of this.listeners) listener(message);
+    }
   }
 
   private failAll(error: Error) {
@@ -81,15 +118,19 @@ class AppServerClient {
     this.pending.clear();
   }
 
-  request(method: string, params?: unknown, timeoutMs = 30_000): Promise<any> {
+  request<T = unknown>(method: string, params?: unknown, timeoutMs = 30_000): Promise<T> {
     if (this.closed) return Promise.reject(new Error("CODEX_APP_SERVER_CLOSED"));
     const id = this.nextId++;
-    return new Promise((resolve, reject) => {
+    return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(String(id));
         reject(new Error("CODEX_RPC_TIMEOUT"));
       }, timeoutMs);
-      this.pending.set(String(id), { resolve, reject, timer });
+      this.pending.set(String(id), {
+        resolve: (value) => resolve(value as T),
+        reject,
+        timer
+      });
       this.child.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
     });
   }
@@ -171,13 +212,17 @@ async function readAuthFile(home: string) {
 }
 
 async function inspect(client: AppServerClient): Promise<ServerlessCodexStatus> {
-  const accountResponse = await client.request("account/read", { refreshToken: true }, 30_000);
-  const account = accountResponse?.account ?? null;
+  const accountResponse = await client.request<AccountReadResult>("account/read", { refreshToken: true }, 30_000);
+  const account = accountResponse.account ?? null;
   const authMode = account?.type === "chatgpt" ? "chatgpt" : account?.type ?? null;
   const modelResponse = authMode === "chatgpt"
-    ? await client.request("model/list", { limit: 100, includeHidden: true }, 30_000)
+    ? await client.request<ModelListResult>("model/list", { limit: 100, includeHidden: true }, 30_000)
     : { data: [] };
-  const models = Array.from(new Set<string>((modelResponse?.data ?? []).flatMap((item: any) => [item?.id, item?.model]).filter((value: unknown): value is string => typeof value === "string")));
+  const models = Array.from(new Set(
+    (modelResponse.data ?? [])
+      .flatMap((item) => [item.id, item.model])
+      .filter((value): value is string => typeof value === "string")
+  ));
   let rateLimits: unknown = null;
   if (authMode === "chatgpt") {
     try { rateLimits = await client.request("account/rateLimits/read", undefined, 30_000); }
@@ -209,7 +254,16 @@ async function withClient<T>(userId: string, task: (client: AppServerClient, hom
 
 export async function readServerlessCodexStatus(userId: string): Promise<ServerlessCodexStatus> {
   if (!(await hasStoredAuth(userId))) {
-    return { connected: false, authMode: null, email: null, planType: null, model: SERVERLESS_CODEX_MODEL, modelAvailable: false, models: [], rateLimits: null };
+    return {
+      connected: false,
+      authMode: null,
+      email: null,
+      planType: null,
+      model: SERVERLESS_CODEX_MODEL,
+      modelAvailable: false,
+      models: [],
+      rateLimits: null
+    };
   }
   try {
     return await withClient(userId, async (client, home) => {
@@ -220,13 +274,25 @@ export async function readServerlessCodexStatus(userId: string): Promise<Serverl
     });
   } catch (error) {
     console.warn("[codex-serverless] status failed", error instanceof Error ? error.message : error);
-    return { connected: false, authMode: null, email: null, planType: null, model: SERVERLESS_CODEX_MODEL, modelAvailable: false, models: [], rateLimits: null };
+    return {
+      connected: false,
+      authMode: null,
+      email: null,
+      planType: null,
+      model: SERVERLESS_CODEX_MODEL,
+      modelAvailable: false,
+      models: [],
+      rateLimits: null
+    };
   }
 }
 
-function usageFromTokenNotification(params: any) {
-  const last = params?.tokenUsage?.last;
-  return { inputTokens: Number(last?.inputTokens ?? 0), outputTokens: Number(last?.outputTokens ?? 0) };
+function usageFromTokenNotification(params: TurnEventParams) {
+  const last = params.tokenUsage?.last;
+  return {
+    inputTokens: Number(last?.inputTokens ?? 0),
+    outputTokens: Number(last?.outputTokens ?? 0)
+  };
 }
 
 export async function generateServerlessCodexStructured<T>(userId: string, input: {
@@ -243,7 +309,8 @@ export async function generateServerlessCodexStructured<T>(userId: string, input
     const snapshot = await inspect(client);
     if (!snapshot.connected) throw new Error("CODEX_CONNECTION_REQUIRED");
     if (!snapshot.modelAvailable) throw new Error("CODEX_LUNA_UNAVAILABLE");
-    const threadResult = await client.request("thread/start", {
+
+    const threadResult = await client.request<ThreadStartResult>("thread/start", {
       model: SERVERLESS_CODEX_MODEL,
       cwd: path.join(home, "work"),
       approvalPolicy: "never",
@@ -251,24 +318,26 @@ export async function generateServerlessCodexStructured<T>(userId: string, input
       developerInstructions: input.system,
       ephemeral: true
     }, 60_000);
-    const threadId = threadResult?.thread?.id;
+    const threadId = threadResult.thread?.id;
     if (!threadId) throw new Error("CODEX_THREAD_START_FAILED");
+
     let turnId: string | null = null;
     let text = "";
     let tokenUsage = { inputTokens: 0, outputTokens: 0 };
-    let finish: ((value: any) => void) | null = null;
-    const terminalPromise = new Promise<any>((resolve) => { finish = resolve; });
+    let finish: ((value: TurnTerminal) => void) | null = null;
+    const terminalPromise = new Promise<TurnTerminal>((resolve) => { finish = resolve; });
     const unsubscribe = client.subscribe((message) => {
-      const params = message.params ?? {};
+      const params = (message.params ?? {}) as TurnEventParams;
       if (params.threadId !== threadId) return;
       if (turnId && params.turnId && params.turnId !== turnId && params.turn?.id !== turnId) return;
       if (message.method === "item/agentMessage/delta" && typeof params.delta === "string") text += params.delta;
       if (message.method === "thread/tokenUsage/updated") tokenUsage = usageFromTokenNotification(params);
       if (message.method === "turn/completed") finish?.({ ok: params.turn?.status === "completed", params });
     });
+
     let timeoutHandle: NodeJS.Timeout | null = null;
     try {
-      const turnResult = await client.request("turn/start", {
+      const turnResult = await client.request<TurnStartResult>("turn/start", {
         threadId,
         input: [{ type: "text", text: input.prompt, textElements: [] }],
         model: SERVERLESS_CODEX_MODEL,
@@ -276,27 +345,39 @@ export async function generateServerlessCodexStructured<T>(userId: string, input
         sandboxPolicy: { type: "readOnly", networkAccess: false },
         approvalPolicy: "never"
       }, 60_000);
-      turnId = turnResult?.turn?.id ?? null;
+      turnId = turnResult.turn?.id ?? null;
       if (!turnId) throw new Error("CODEX_TURN_START_FAILED");
+
       const timeoutMs = Math.min(Math.max(Number(input.timeoutMs ?? 220_000), 10_000), 240_000);
-      const timeout = new Promise((_, reject) => { timeoutHandle = setTimeout(() => reject(new Error("CODEX_GENERATION_TIMEOUT")), timeoutMs); });
-      const completed = await Promise.race([terminalPromise, timeout]) as any;
-      if (!completed?.ok) {
-        const errorText = JSON.stringify(completed?.params?.turn?.error ?? "");
+      const timeout = new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => reject(new Error("CODEX_GENERATION_TIMEOUT")), timeoutMs);
+      });
+      const completed = await Promise.race([terminalPromise, timeout]);
+      if (!completed.ok) {
+        const errorText = JSON.stringify(completed.params.turn?.error ?? "");
         if (/rate.?limit|usage.?limit|quota/i.test(errorText)) throw new Error("CODEX_USAGE_LIMIT");
         throw new Error("CODEX_GENERATION_FAILED");
       }
       if (!text.trim()) {
-        const items = completed.params?.turn?.items ?? [];
-        const agent = [...items].reverse().find((item: any) => item?.type === "agentMessage" || item?.type === "agent_message");
+        const items = completed.params.turn?.items ?? [];
+        const agent = [...items].reverse().find((item) => item.type === "agentMessage" || item.type === "agent_message");
         text = typeof agent?.text === "string" ? agent.text : "";
       }
       let value: unknown;
       try { value = JSON.parse(text); }
       catch { throw new Error("CODEX_INVALID_JSON"); }
+
       const refreshedAuth = await readAuthFile(home);
       if (refreshedAuth) await saveStoredAuth(userId, refreshedAuth, snapshot);
-      return { value: input.parse(value), usage: { ...tokenUsage, durationMs: Date.now() - started, model: SERVERLESS_CODEX_MODEL, requestId: turnId ?? undefined } };
+      return {
+        value: input.parse(value),
+        usage: {
+          ...tokenUsage,
+          durationMs: Date.now() - started,
+          model: SERVERLESS_CODEX_MODEL,
+          requestId: turnId ?? undefined
+        }
+      };
     } finally {
       if (timeoutHandle) clearTimeout(timeoutHandle);
       unsubscribe();
@@ -322,21 +403,25 @@ export async function startServerlessCodexLoginStream(userId: string) {
           controller.close();
           return;
         }
-        const login = await client.request("account/login/start", { type: "chatgptDeviceCode" }, 60_000);
-        if (!login?.loginId || !login?.verificationUrl || !login?.userCode) throw new Error("CODEX_DEVICE_CODE_START_FAILED");
+
+        const login = await client.request<LoginStartResult>("account/login/start", { type: "chatgptDeviceCode" }, 60_000);
+        if (!login.loginId || !login.verificationUrl || !login.userCode) throw new Error("CODEX_DEVICE_CODE_START_FAILED");
         send({ type: "device_code", loginId: login.loginId, verificationUrl: login.verificationUrl, userCode: login.userCode });
+
         let completedResolve: ((value: boolean) => void) | null = null;
         const completed = new Promise<boolean>((resolve) => { completedResolve = resolve; });
         unsubscribe = client.subscribe((message) => {
           if (message.method !== "account/login/completed") return;
-          if (message.params?.loginId && message.params.loginId !== login.loginId) return;
-          completedResolve?.(message.params?.success !== false);
+          const params = (message.params ?? {}) as LoginCompletedParams;
+          if (params.loginId && params.loginId !== login.loginId) return;
+          completedResolve?.(params.success !== false);
         });
         const success = await Promise.race([
           completed,
           new Promise<boolean>((_, reject) => setTimeout(() => reject(new Error("CODEX_LOGIN_DID_NOT_COMPLETE")), 270_000))
         ]);
         if (!success) throw new Error("CODEX_LOGIN_FAILED");
+
         const status = await inspect(client);
         const authJson = await readAuthFile(home);
         if (!status.connected || !authJson) throw new Error("CODEX_LOGIN_CREDENTIAL_MISSING");
@@ -353,5 +438,13 @@ export async function startServerlessCodexLoginStream(userId: string) {
       }
     }
   });
-  return new Response(stream, { status: 200, headers: { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-store, no-transform", "x-accel-buffering": "no" } });
+
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      "content-type": "application/x-ndjson; charset=utf-8",
+      "cache-control": "no-store, no-transform",
+      "x-accel-buffering": "no"
+    }
+  });
 }
