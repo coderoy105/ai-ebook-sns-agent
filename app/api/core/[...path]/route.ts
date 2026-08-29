@@ -131,8 +131,8 @@ async function saveOpenRouterKeyFromRequest(request: Request, userId: string) {
 }
 
 async function hasBackgroundCredential(userId: string, provider: "openrouter" | "codex") {
-  const module = await import("@/lib/ai/provider-connection");
-  return module.hasBackgroundCredential(userId, provider);
+  const connectionModule = await import("@/lib/ai/provider-connection");
+  return connectionModule.hasBackgroundCredential(userId, provider);
 }
 
 async function assertCodexReady(userId: string) {
