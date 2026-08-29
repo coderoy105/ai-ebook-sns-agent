@@ -28,8 +28,33 @@ function planningLabel(jobStatus:string,bookStatus:string) {
 
 export function BookEditorShell({initialBook}:{initialBook:Book}) {
   const planningOnly=initialBook.parts.length===0&&["PLANNING","FAILED"].includes(initialBook.status);
-  if(!planningOnly) return <BookEditor initialBook={initialBook}/>;
-  return <PlanningWorkspace initialBook={initialBook}/>;
+  return planningOnly ? <PlanningWorkspace initialBook={initialBook}/> : <ManuscriptWorkspace initialBook={initialBook}/>;
+}
+
+function ManuscriptWorkspace({initialBook}:{initialBook:Book}) {
+  const reconnectHandled=useRef(false);
+
+  useEffect(()=>{
+    if(reconnectHandled.current)return;
+    reconnectHandled.current=true;
+    if(!consumeFreeAiJustConnected())return;
+
+    void (async()=>{
+      try{
+        const statusResponse=await fetch(`/api/books/${initialBook.id}/status`,{cache:"no-store"});
+        if(!statusResponse.ok)return;
+        const statusData=await statusResponse.json();
+        if(statusData.job?.status!=="NEEDS_RECONNECT")return;
+        const key=getFreeAiKey();
+        const headers:Record<string,string>={};
+        if(key)headers["x-openrouter-key"]=key;
+        const response=await fetch(`/api/books/${initialBook.id}/generate`,{method:"POST",headers});
+        if(response.ok)location.reload();
+      }catch{/* BookEditor keeps the reconnect control visible if automatic resume fails. */}
+    })();
+  },[initialBook.id]);
+
+  return <BookEditor initialBook={initialBook}/>;
 }
 
 function PlanningWorkspace({initialBook}:{initialBook:Book}) {
@@ -81,11 +106,11 @@ function PlanningWorkspace({initialBook}:{initialBook:Book}) {
   },[refresh]);
 
   useEffect(()=>{
-    if(reconnectConsumed.current)return;
+    if(reconnectConsumed.current||!state.job)return;
     reconnectConsumed.current=true;
     const justConnected=consumeFreeAiJustConnected();
-    if(justConnected&&state.job?.status==="NEEDS_RECONNECT")void resumePlanning();
-  },[resumePlanning,state.job?.status]);
+    if(justConnected&&state.job.status==="NEEDS_RECONNECT")void resumePlanning();
+  },[resumePlanning,state.job]);
 
   const jobStatus=state.job?.status??"";
   const needsReconnect=jobStatus==="NEEDS_RECONNECT";
