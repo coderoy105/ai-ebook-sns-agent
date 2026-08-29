@@ -1,5 +1,3 @@
-import { generateServerlessCodexStructured, readServerlessCodexStatus } from "@/lib/ai/codex-serverless";
-
 export const CODEX_LUNA_MODEL = "gpt-5.6-luna";
 
 export type CodexWorkerStatus = {
@@ -43,7 +41,13 @@ async function sha256Hex(value: string) {
 async function signature(secret: string, timestamp: string, nonce: string, method: string, pathWithQuery: string, bodyText: string) {
   const bodyHash = await sha256Hex(bodyText);
   const canonical = `${timestamp}\n${nonce}\n${method}\n${pathWithQuery}\n${bodyHash}`;
-  const key = await crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
   return bytesToHex(await crypto.subtle.sign("HMAC", key, encoder.encode(canonical)));
 }
 
@@ -51,6 +55,7 @@ export async function callCodexWorker<T>(pathWithQuery: string, request: WorkerR
   const { baseUrl, secret } = workerConfig();
   if (!baseUrl || secret.length < 32) throw new Error("CODEX_WORKER_UNAVAILABLE");
   if (!pathWithQuery.startsWith("/")) throw new Error("CODEX_WORKER_INVALID_PATH");
+
   const method = request.method ?? (request.body ? "POST" : "GET");
   const bodyText = request.body ? JSON.stringify(request.body) : "";
   const timestamp = Date.now().toString();
@@ -58,6 +63,7 @@ export async function callCodexWorker<T>(pathWithQuery: string, request: WorkerR
   const requestSignature = await signature(secret, timestamp, nonce, method, pathWithQuery, bodyText);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), request.timeoutMs ?? 30000);
+
   try {
     const response = await fetch(`${baseUrl}${pathWithQuery}`, {
       method,
@@ -82,12 +88,12 @@ export async function callCodexWorker<T>(pathWithQuery: string, request: WorkerR
   }
 }
 
-export async function readCodexWorkerStatus(userId: string): Promise<CodexWorkerStatus> {
-  if (!codexWorkerConfigured()) return readServerlessCodexStatus(userId);
+export async function readCodexWorkerStatus(userId: string) {
   return callCodexWorker<CodexWorkerStatus>(`/auth/status?userId=${encodeURIComponent(userId)}`);
 }
 
 export async function hasCodexWorkerConnection(userId: string) {
+  if (!codexWorkerConfigured()) return false;
   try {
     const status = await readCodexWorkerStatus(userId);
     return status.connected && status.authMode === "chatgpt" && status.modelAvailable;
@@ -104,7 +110,6 @@ export async function generateCodexWorkerStructured<T>(userId: string, args: {
   timeoutMs?: number;
   parse: (value: unknown) => T;
 }) {
-  if (!codexWorkerConfigured()) return generateServerlessCodexStructured(userId, args);
   const result = await callCodexWorker<{
     value: unknown;
     usage: { inputTokens: number; outputTokens: number; durationMs: number; model: string; requestId?: string };
@@ -124,10 +129,13 @@ export async function generateCodexWorkerStructured<T>(userId: string, args: {
   return { value: args.parse(result.value), usage: result.usage };
 }
 
+// Exported only for deterministic unit tests of the shared HMAC contract.
 export async function verifyCodexWorkerSignatureForTest(secret: string, signatureHex: string, timestamp: string, nonce: string, method: string, pathWithQuery: string, bodyText: string) {
   const expected = await signature(secret, timestamp, nonce, method, pathWithQuery, bodyText);
   if (expected.length !== signatureHex.length) return false;
   let difference = 0;
-  for (let index = 0; index < expected.length; index += 1) difference |= expected.charCodeAt(index) ^ signatureHex.charCodeAt(index);
+  for (let index = 0; index < expected.length; index += 1) {
+    difference |= expected.charCodeAt(index) ^ signatureHex.charCodeAt(index);
+  }
   return difference === 0;
 }
