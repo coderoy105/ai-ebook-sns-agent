@@ -1,11 +1,11 @@
 import { Sandbox } from "@vercel/sandbox";
 
-const SANDBOX_NAME = "ai-book-studio-codex-runtime-v2";
+const SANDBOX_NAME = "ai-book-studio-codex-runtime-v1";
 const REPOSITORY_URL = "https://github.com/coderoy105/ai-ebook-sns-agent.git";
 const SANDBOX_ROOT = "/vercel/sandbox";
 const WORKER_DIR = `${SANDBOX_ROOT}/services/codex-worker`;
 const VERSION_FILE = `${SANDBOX_ROOT}/.ai-book-codex-worker-version`;
-const WORKER_VERSION = "2026-08-30-sandbox-runtime-v2";
+const WORKER_VERSION = "2026-08-30-sandbox-runtime-v3";
 const SANDBOX_TIMEOUT_MS = 44 * 60 * 1000;
 const WORKER_PORT = "8788";
 
@@ -21,6 +21,35 @@ type LocalResponse = {
 };
 
 let sandboxPromise: Promise<Sandbox> | null = null;
+
+function diagnosticValue(value: unknown, depth = 0): unknown {
+  if (depth > 2 || value == null) return value;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+  if (value instanceof Error) {
+    const own = Object.fromEntries(Object.getOwnPropertyNames(value).map((key) => [key, diagnosticValue((value as unknown as Record<string, unknown>)[key], depth + 1)]));
+    return { name: value.name, message: value.message, ...own, cause: diagnosticValue(value.cause, depth + 1) };
+  }
+  if (Array.isArray(value)) return value.slice(0, 8).map((item) => diagnosticValue(item, depth + 1));
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const safeKeys = ["name", "message", "code", "status", "statusCode", "cause", "error", "details"];
+    return Object.fromEntries(safeKeys.filter((key) => key in record).map((key) => [key, diagnosticValue(record[key], depth + 1)]));
+  }
+  return String(value);
+}
+
+function describeError(error: unknown) {
+  try {
+    const raw = JSON.stringify(diagnosticValue(error));
+    const sanitized = raw
+      .replace(/Bearer\\s+[A-Za-z0-9._~-]+/gi, "Bearer [redacted]")
+      .replace(/\"(access_token|refresh_token|id_token|token)\"\s*:\s*\"[^\"]+\"/gi, '"$1":"[redacted]"')
+      .replace(/[A-Za-z0-9_-]{80,}/g, "[redacted]")
+      .slice(0, 1600);
+    if (sanitized && sanitized !== "{}") return sanitized;
+  } catch {}
+  return error instanceof Error ? error.message : String(error);
+}
 
 function commandError(prefix: string, exitCode: number, stderr: string) {
   const detail = stderr.trim().slice(0, 1000);
@@ -116,29 +145,33 @@ async function ensureWorkerRunning(sandbox: Sandbox) {
 
 async function acquireSandbox() {
   if (!codexSandboxSupported()) throw new Error("CODEX_SANDBOX_UNAVAILABLE");
-  const sandbox = await Sandbox.getOrCreate({
-    name: SANDBOX_NAME,
-    source: { type: "git", url: REPOSITORY_URL, revision: "main", depth: 1 },
-    runtime: "node24",
-    resources: { vcpus: 1 },
-    timeout: SANDBOX_TIMEOUT_MS,
-    persistent: true,
-    snapshotExpiration: 0,
-    keepLastSnapshots: { count: 2, expiration: 0, deleteEvicted: true },
-    env: {
-      PORT: WORKER_PORT,
-      CODEX_DATA_ROOT: `${SANDBOX_ROOT}/.codex-users`,
-      CODEX_WORKER_TRUST_LOCALHOST: "1",
-      CODEX_WORKER_HOST: "127.0.0.1",
-      CODEX_WORKER_IDLE_MS: "900000"
-    },
-    resume: true,
-    onCreate: async (created) => { await prepareWorkerFiles(created); },
-    onResume: async (resumed) => { await prepareWorkerFiles(resumed); }
-  });
-  await prepareWorkerFiles(sandbox);
-  await ensureWorkerRunning(sandbox);
-  return sandbox;
+  try {
+    const sandbox = await Sandbox.getOrCreate({
+      name: SANDBOX_NAME,
+      source: { type: "git", url: REPOSITORY_URL, revision: "main", depth: 1 },
+      runtime: "node24",
+      resources: { vcpus: 1 },
+      timeout: SANDBOX_TIMEOUT_MS,
+      persistent: true,
+      snapshotExpiration: 0,
+      keepLastSnapshots: { count: 2, expiration: 0, deleteEvicted: true },
+      env: {
+        PORT: WORKER_PORT,
+        CODEX_DATA_ROOT: `${SANDBOX_ROOT}/.codex-users`,
+        CODEX_WORKER_TRUST_LOCALHOST: "1",
+        CODEX_WORKER_HOST: "127.0.0.1",
+        CODEX_WORKER_IDLE_MS: "900000"
+      },
+      resume: true,
+      onCreate: async (created) => { await prepareWorkerFiles(created); },
+      onResume: async (resumed) => { await prepareWorkerFiles(resumed); }
+    });
+    await prepareWorkerFiles(sandbox);
+    await ensureWorkerRunning(sandbox);
+    return sandbox;
+  } catch (error) {
+    throw new Error(`CODEX_SANDBOX_ACQUIRE_FAILED:${describeError(error)}`);
+  }
 }
 
 async function getSandbox() {
@@ -164,8 +197,8 @@ export async function callCodexSandboxWorker<T>(pathWithQuery: string, request: 
     return await localRequest<T>(sandbox, pathWithQuery, request);
   } catch (error) {
     sandboxPromise = null;
-    const message = error instanceof Error ? error.message : "CODEX_SANDBOX_UNAVAILABLE";
+    const message = error instanceof Error ? error.message : describeError(error);
     if (/^(CODEX_|WORKER_|INVALID_|REQUEST_)/.test(message)) throw new Error(message);
-    throw new Error("CODEX_SANDBOX_UNAVAILABLE");
+    throw new Error(`CODEX_SANDBOX_UNAVAILABLE:${describeError(error)}`);
   }
 }
