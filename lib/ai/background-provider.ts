@@ -66,7 +66,7 @@ async function generateWithCodexBridge<T>(userId: string, args: StructuredArgs<T
   });
   if (!oidcToken) throw new Error("CODEX_INTERNAL_AUTH_UNAVAILABLE");
 
-  const response = await fetch(`${internalOrigin()}/api/internal/codex/generate`, {
+  const response = await fetch(`${internalOrigin()}/api/books/codex/generate`, {
     method: "POST",
     headers: {
       authorization: `Bearer ${oidcToken}`,
