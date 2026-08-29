@@ -10,12 +10,14 @@ const require = createRequire(import.meta.url);
 const PORT = Number(process.env.PORT ?? 8787);
 const DATA_ROOT = path.resolve(process.env.CODEX_DATA_ROOT ?? "/data/codex-users");
 const SHARED_SECRET = process.env.CODEX_WORKER_SHARED_SECRET?.trim() ?? "";
+const TRUST_LOCALHOST = process.env.CODEX_WORKER_TRUST_LOCALHOST === "1";
+const LISTEN_HOST = process.env.CODEX_WORKER_HOST?.trim() || "0.0.0.0";
 const CLOCK_SKEW_MS = Number(process.env.CODEX_WORKER_CLOCK_SKEW_MS ?? 120000);
 const IDLE_MS = Number(process.env.CODEX_WORKER_IDLE_MS ?? 900000);
 const MODEL = "gpt-5.6-luna";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-if (SHARED_SECRET.length < 32) throw new Error("CODEX_WORKER_SHARED_SECRET must be at least 32 characters.");
+if (!TRUST_LOCALHOST && SHARED_SECRET.length < 32) throw new Error("CODEX_WORKER_SHARED_SECRET must be at least 32 characters.");
 
 function codexEntry() {
   const packageJson = require.resolve("@openai/codex/package.json");
@@ -182,6 +184,11 @@ function safeEqualHex(a, b) {
   const left = Buffer.from(a, "hex");
   const right = Buffer.from(b, "hex");
   return left.length === right.length && timingSafeEqual(left, right);
+}
+
+function isLoopbackRequest(req) {
+  const address = req.socket?.remoteAddress ?? "";
+  return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
 }
 
 function verifyRequest(req, pathWithQuery, bodyText) {
@@ -396,7 +403,8 @@ const server = http.createServer(async (req, res) => {
   try {
     bodyText = await readBody(req);
     const pathWithQuery = `${url.pathname}${url.search}`;
-    if (!verifyRequest(req, pathWithQuery, bodyText)) return json(res, 401, { error: "WORKER_UNAUTHORIZED" });
+    const trustedLocal = TRUST_LOCALHOST && isLoopbackRequest(req);
+    if (!trustedLocal && !verifyRequest(req, pathWithQuery, bodyText)) return json(res, 401, { error: "WORKER_UNAUTHORIZED" });
     const body = bodyText ? JSON.parse(bodyText) : {};
     const userId = typeof body.userId === "string" ? body.userId : url.searchParams.get("userId") ?? "";
     if (!UUID_RE.test(userId)) return json(res, 400, { error: "INVALID_USER_ID" });
@@ -428,4 +436,4 @@ const server = http.createServer(async (req, res) => {
 });
 
 await mkdir(DATA_ROOT, { recursive: true, mode: 0o700 });
-server.listen(PORT, "0.0.0.0");
+server.listen(PORT, LISTEN_HOST);

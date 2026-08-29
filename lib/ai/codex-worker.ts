@@ -1,3 +1,4 @@
+import { callCodexSandboxWorker, codexSandboxSupported } from "@/lib/ai/codex-sandbox";
 export const CODEX_LUNA_MODEL = "gpt-5.6-luna";
 
 export type CodexWorkerStatus = {
@@ -27,7 +28,7 @@ function workerConfig() {
 
 export function codexWorkerConfigured() {
   const { baseUrl, secret } = workerConfig();
-  return Boolean(baseUrl && secret.length >= 32);
+  return Boolean(baseUrl && secret.length >= 32) || codexSandboxSupported();
 }
 
 function bytesToHex(buffer: ArrayBuffer) {
@@ -53,7 +54,10 @@ async function signature(secret: string, timestamp: string, nonce: string, metho
 
 export async function callCodexWorker<T>(pathWithQuery: string, request: WorkerRequest = {}): Promise<T> {
   const { baseUrl, secret } = workerConfig();
-  if (!baseUrl || secret.length < 32) throw new Error("CODEX_WORKER_UNAVAILABLE");
+  if (!baseUrl || secret.length < 32) {
+    if (codexSandboxSupported()) return callCodexSandboxWorker<T>(pathWithQuery, request);
+    throw new Error("CODEX_WORKER_UNAVAILABLE");
+  }
   if (!pathWithQuery.startsWith("/")) throw new Error("CODEX_WORKER_INVALID_PATH");
 
   const method = request.method ?? (request.body ? "POST" : "GET");
