@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test \"tests/**/*.test.ts\""
+    "test": "node --import tsx --test \"tests/**/*.test.ts\"",
+    "worker:check": "node --check services/codex-worker/server.mjs"
   },
   "dependencies": {
     "@openai/codex-sdk": "0.150.1",
