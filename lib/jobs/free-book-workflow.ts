@@ -151,7 +151,7 @@ async function generateFreeSectionStep(input: WorkflowInput & { sectionId: strin
   const supabase = createServiceSupabase();
 
   const { data: rawSection, error: sectionError } = await supabase.from("sections")
-    .select("id,book_id,chapter_id,title,goal,target_words,status,chapter:chapters(id,title,goal,position),book:books!inner(id,user_id,title,subtitle,idea,reader_profiles(*),writing_styles(*),story_bibles(data),knowledge_maps(data))")
+    .select("id,book_id,chapter_id,title,goal,target_words,status,chapter:chapters(id,title,goal,position),book:books!sections_book_id_fkey(id,user_id,title,subtitle,idea,reader_profiles(*),writing_styles(*),story_bibles(data),knowledge_maps(data))")
     .eq("id", input.sectionId).single();
   if (sectionError || !rawSection) throw new FatalError(sectionError?.message ?? "SECTION_NOT_FOUND");
 
