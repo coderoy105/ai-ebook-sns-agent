@@ -1,13 +1,13 @@
 import { Sandbox } from "@vercel/sandbox";
 
-const SANDBOX_NAME = "ai-book-studio-codex-runtime-v1";
+const SANDBOX_NAME = "ai-book-studio-codex-runtime-v2";
 const REPOSITORY_URL = "https://github.com/coderoy105/ai-ebook-sns-agent.git";
 const SANDBOX_ROOT = "/vercel/sandbox";
 const WORKER_DIR = `${SANDBOX_ROOT}/services/codex-worker`;
 const VERSION_FILE = `${SANDBOX_ROOT}/.ai-book-codex-worker-version`;
-const WORKER_VERSION = "2026-08-29-sandbox-runtime-v1";
+const WORKER_VERSION = "2026-08-30-sandbox-runtime-v2";
 const SANDBOX_TIMEOUT_MS = 44 * 60 * 1000;
-const WORKER_PORT = "8787";
+const WORKER_PORT = "8788";
 
 type SandboxWorkerRequest = {
   method?: "GET" | "POST";
@@ -107,9 +107,9 @@ async function ensureWorkerRunning(sandbox: Sandbox) {
     }
   });
 
-  for (let attempt = 0; attempt < 15; attempt += 1) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
     if (await workerHealthy(sandbox)) return;
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await new Promise((resolve) => setTimeout(resolve, 300));
   }
   throw new Error("CODEX_SANDBOX_WORKER_START_FAILED");
 }
