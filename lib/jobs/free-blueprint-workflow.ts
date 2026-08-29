@@ -46,45 +46,65 @@ type ChapterResult =
   | { kind: "connection-expired" }
   | { kind: "temporary-error"; message: string };
 
+type ChapterRequest = {
+  partIndex: number;
+  chapterIndex: number;
+  selectedTitle: string;
+  coreMessage: string;
+  part: BookBlueprintSkeleton["parts"][number];
+  chapter: BookBlueprintSkeleton["parts"][number]["chapters"][number];
+};
+
+type BlueprintStepRequest =
+  | { action: "mark"; input: WorkflowInput; status: string; progress: number; message: string }
+  | { action: "skeleton"; input: WorkflowInput }
+  | ({ action: "chapter"; input: WorkflowInput } & ChapterRequest)
+  | { action: "persist"; input: WorkflowInput; blueprint: BookBlueprint; usages: Usage[] }
+  | { action: "finish"; input: WorkflowInput; providerLabel: string }
+  | { action: "fail"; input: WorkflowInput; message: string };
+
+type BlueprintStepResult = SkeletonResult | ChapterResult | { kind: "ok" };
+
 export async function generateFreeBlueprintWorkflow(input: WorkflowInput) {
   "use workflow";
 
   const provider = normalizeBackgroundProvider(input.form.aiProvider);
   const providerLabel = backgroundProviderLabel(provider);
   try {
-    await markPlanning(input, "PLANNING", 8, `${providerLabel}로 Book Blueprint를 작은 단계로 나눠 백그라운드 생성을 시작했습니다.`);
+    await blueprintStep({ action: "mark", input, status: "PLANNING", progress: 8, message: `${providerLabel}로 Book Blueprint를 작은 단계로 나눠 백그라운드 생성을 시작했습니다.` });
 
     let skeletonResult: Extract<SkeletonResult, { kind: "completed" }> | null = null;
     let skeletonRetries = 0;
     while (!skeletonResult) {
-      const result = await generateBlueprintSkeletonStep(input);
+      const result = await blueprintStep({ action: "skeleton", input }) as SkeletonResult;
       if (result.kind === "completed") {
         skeletonResult = result;
-        await markPlanning(
+        await blueprintStep({
+          action: "mark",
           input,
-          "PLANNING",
-          30,
-          result.checkpoint ? "저장된 책 구조를 불러왔습니다." : `1단계 책 구조와 Chapter 설계가 완료되었습니다. · ${providerLabel}`
-        );
+          status: "PLANNING",
+          progress: 30,
+          message: result.checkpoint ? "저장된 책 구조를 불러왔습니다." : `1단계 책 구조와 Chapter 설계가 완료되었습니다. · ${providerLabel}`
+        });
         break;
       }
       if (result.kind === "usage-limit") {
-        await markPlanning(input, "WAITING_LIMIT", 12, limitMessage(provider, "Book Blueprint 책 구조 설계"));
+        await blueprintStep({ action: "mark", input, status: "WAITING_LIMIT", progress: 12, message: limitMessage(provider, "Book Blueprint 책 구조 설계") });
         await sleep(limitWait(provider));
-        await markPlanning(input, "PLANNING", 14, `${providerLabel} 사용 한도 대기 후 저장된 단계에서 자동 재개합니다.`);
+        await blueprintStep({ action: "mark", input, status: "PLANNING", progress: 14, message: `${providerLabel} 사용 한도 대기 후 저장된 단계에서 자동 재개합니다.` });
         continue;
       }
       if (result.kind === "connection-expired") {
-        await markPlanning(input, "NEEDS_RECONNECT", 12, `${providerLabel} 연결이 만료되었습니다. 다시 연결하면 저장된 단계에서 이어집니다.`);
+        await blueprintStep({ action: "mark", input, status: "NEEDS_RECONNECT", progress: 12, message: `${providerLabel} 연결이 만료되었습니다. 다시 연결하면 저장된 단계에서 이어집니다.` });
         return { status: "needs-reconnect", bookId: input.bookId };
       }
       if (skeletonRetries < 1) {
         skeletonRetries += 1;
-        await markPlanning(input, "RETRYING", 12, "책 구조 응답 형식이 불완전해 2분 뒤 작은 요청으로 한 번 더 시도합니다.");
+        await blueprintStep({ action: "mark", input, status: "RETRYING", progress: 12, message: "책 구조 응답 형식이 불완전해 2분 뒤 작은 요청으로 한 번 더 시도합니다." });
         await sleep("2m");
         continue;
       }
-      await failPlanning(input, result.message);
+      await blueprintStep({ action: "fail", input, message: result.message });
       return { status: "paused-error", bookId: input.bookId, error: result.message };
     }
 
@@ -104,15 +124,16 @@ export async function generateFreeBlueprintWorkflow(input: WorkflowInput) {
         let chapterRetries = 0;
 
         while (!chapterResult) {
-          const result = await generateChapterSectionsStep({
-            ...input,
+          const result = await blueprintStep({
+            action: "chapter",
+            input,
             partIndex,
             chapterIndex,
             selectedTitle: skeleton.selectedTitle,
             coreMessage: skeleton.coreMessage,
             part,
             chapter
-          });
+          }) as ChapterResult;
 
           if (result.kind === "completed") {
             chapterResult = result;
@@ -121,43 +142,45 @@ export async function generateFreeBlueprintWorkflow(input: WorkflowInput) {
           }
           if (result.kind === "usage-limit") {
             const progress = planningProgress(completedChapters, totalChapters);
-            await markPlanning(input, "WAITING_LIMIT", progress, limitMessage(provider, `Chapter ${completedChapters + 1}/${totalChapters} 설계`));
+            await blueprintStep({ action: "mark", input, status: "WAITING_LIMIT", progress, message: limitMessage(provider, `Chapter ${completedChapters + 1}/${totalChapters} 설계`) });
             await sleep(limitWait(provider));
-            await markPlanning(input, "PLANNING", progress, `${providerLabel} 사용 한도 대기 후 다음 Chapter 설계를 재개합니다.`);
+            await blueprintStep({ action: "mark", input, status: "PLANNING", progress, message: `${providerLabel} 사용 한도 대기 후 다음 Chapter 설계를 재개합니다.` });
             continue;
           }
           if (result.kind === "connection-expired") {
-            await markPlanning(input, "NEEDS_RECONNECT", planningProgress(completedChapters, totalChapters), `${providerLabel} 연결이 만료되었습니다. 다시 연결하면 완료된 Chapter 다음부터 이어집니다.`);
+            await blueprintStep({ action: "mark", input, status: "NEEDS_RECONNECT", progress: planningProgress(completedChapters, totalChapters), message: `${providerLabel} 연결이 만료되었습니다. 다시 연결하면 완료된 Chapter 다음부터 이어집니다.` });
             return { status: "needs-reconnect", bookId: input.bookId };
           }
           if (chapterRetries < 1) {
             chapterRetries += 1;
-            await markPlanning(input, "RETRYING", planningProgress(completedChapters, totalChapters), `Chapter ${completedChapters + 1}/${totalChapters} 응답이 불완전해 2분 뒤 해당 Chapter만 다시 시도합니다.`);
+            await blueprintStep({ action: "mark", input, status: "RETRYING", progress: planningProgress(completedChapters, totalChapters), message: `Chapter ${completedChapters + 1}/${totalChapters} 응답이 불완전해 2분 뒤 해당 Chapter만 다시 시도합니다.` });
             await sleep("2m");
             continue;
           }
-          await failPlanning(input, result.message);
+          await blueprintStep({ action: "fail", input, message: result.message });
           return { status: "paused-error", bookId: input.bookId, error: result.message };
         }
 
         chapters.push({ ...chapter, sections: chapterResult.plan.sections });
         completedChapters += 1;
-        await markPlanning(
+        await blueprintStep({
+          action: "mark",
           input,
-          "PLANNING",
-          planningProgress(completedChapters, totalChapters),
-          `${completedChapters}/${totalChapters} Chapter 세부 목차 완료${chapterResult.checkpoint ? " · 저장본 복원" : ` · ${providerLabel}`}`
-        );
+          status: "PLANNING",
+          progress: planningProgress(completedChapters, totalChapters),
+          message: `${completedChapters}/${totalChapters} Chapter 세부 목차 완료${chapterResult.checkpoint ? " · 저장본 복원" : ` · ${providerLabel}`}`
+        });
       }
       parts.push({ ...part, chapters });
     }
 
     const blueprint = BookBlueprintSchema.parse({ ...skeleton, parts });
-    await persistBlueprintStep(input, blueprint, usage);
-    await finishPlanning(input, providerLabel);
+    await blueprintStep({ action: "persist", input, blueprint, usages: usage });
+    await blueprintStep({ action: "finish", input, providerLabel });
     return { status: "completed", bookId: input.bookId };
   } catch (error) {
-    await failPlanning(input, error instanceof Error ? error.message : String(error));
+    const message = error instanceof Error ? error.message : String(error);
+    await blueprintStep({ action: "fail", input, message });
     throw error;
   }
 }
@@ -200,6 +223,29 @@ function chapterStepType(provider: BackgroundAiProvider, partIndex: number, chap
   return `${backgroundProviderCheckpointPrefix(provider)}_BLUEPRINT_CHAPTER_V3:${partIndex}:${chapterIndex}`;
 }
 
+async function blueprintStep(request: BlueprintStepRequest): Promise<BlueprintStepResult> {
+  "use step";
+
+  switch (request.action) {
+    case "mark":
+      await markPlanning(request.input, request.status, request.progress, request.message);
+      return { kind: "ok" };
+    case "skeleton":
+      return generateBlueprintSkeleton(request.input);
+    case "chapter":
+      return generateChapterSections(request.input, request);
+    case "persist":
+      await persistBlueprint(request.input, request.blueprint, request.usages);
+      return { kind: "ok" };
+    case "finish":
+      await finishPlanning(request.input, request.providerLabel);
+      return { kind: "ok" };
+    case "fail":
+      await failPlanning(request.input, request.message);
+      return { kind: "ok" };
+  }
+}
+
 async function loadCheckpoint<T>(bookId: string, stepType: string, parse: (value: unknown) => T): Promise<T | null> {
   const supabase = createServiceSupabase();
   const { data, error } = await supabase.from("generation_steps")
@@ -231,8 +277,7 @@ async function saveCheckpoint(input: WorkflowInput, stepType: string, output: un
   if (error) throw new FatalError(error.message);
 }
 
-async function generateBlueprintSkeletonStep(input: WorkflowInput): Promise<SkeletonResult> {
-  "use step";
+async function generateBlueprintSkeleton(input: WorkflowInput): Promise<SkeletonResult> {
   const provider = providerOf(input);
   const stepType = skeletonStepType(provider);
   const checkpoint = await loadCheckpoint(input.bookId, stepType, (value) => BookBlueprintSkeletonSchema.parse(value));
@@ -255,17 +300,9 @@ async function generateBlueprintSkeletonStep(input: WorkflowInput): Promise<Skel
   }
 }
 
-async function generateChapterSectionsStep(input: WorkflowInput & {
-  partIndex: number;
-  chapterIndex: number;
-  selectedTitle: string;
-  coreMessage: string;
-  part: BookBlueprintSkeleton["parts"][number];
-  chapter: BookBlueprintSkeleton["parts"][number]["chapters"][number];
-}): Promise<ChapterResult> {
-  "use step";
+async function generateChapterSections(input: WorkflowInput, request: ChapterRequest): Promise<ChapterResult> {
   const provider = providerOf(input);
-  const stepType = chapterStepType(provider, input.partIndex, input.chapterIndex);
+  const stepType = chapterStepType(provider, request.partIndex, request.chapterIndex);
   const checkpoint = await loadCheckpoint(input.bookId, stepType, (value) => ChapterSectionsSchema.parse(value));
   if (checkpoint) {
     return { kind: "completed", plan: checkpoint, usage: { inputTokens: 0, outputTokens: 0, durationMs: 0, model: "checkpoint" }, checkpoint: true };
@@ -279,13 +316,13 @@ async function generateChapterSectionsStep(input: WorkflowInput & {
       system: plannerSystem(),
       prompt: chapterSectionsPrompt({
         form: input.form,
-        selectedTitle: input.selectedTitle,
-        coreMessage: input.coreMessage,
-        partTitle: input.part.title,
-        partPurpose: input.part.purpose,
-        chapterTitle: input.chapter.title,
-        chapterGoal: input.chapter.goal,
-        chapterTargetWords: input.chapter.targetWords,
+        selectedTitle: request.selectedTitle,
+        coreMessage: request.coreMessage,
+        partTitle: request.part.title,
+        partPurpose: request.part.purpose,
+        chapterTitle: request.chapter.title,
+        chapterGoal: request.chapter.goal,
+        chapterTargetWords: request.chapter.targetWords,
         preferredSectionMin: rule.sectionRange[0],
         preferredSectionMax: rule.sectionRange[1]
       }),
@@ -298,8 +335,7 @@ async function generateChapterSectionsStep(input: WorkflowInput & {
   }
 }
 
-async function persistBlueprintStep(input: WorkflowInput, blueprint: BookBlueprint, usages: Usage[]) {
-  "use step";
+async function persistBlueprint(input: WorkflowInput, blueprint: BookBlueprint, usages: Usage[]) {
   const supabase = createServiceSupabase();
   const provider = providerOf(input);
 
@@ -414,7 +450,6 @@ async function persistBlueprintStep(input: WorkflowInput, blueprint: BookBluepri
 }
 
 async function markPlanning(input: WorkflowInput, status: string, progress: number, message: string) {
-  "use step";
   const supabase = createServiceSupabase();
   await Promise.all([
     supabase.from("generation_jobs").update({ status, progress, updated_at: new Date().toISOString() }).eq("id", input.jobId),
@@ -423,7 +458,6 @@ async function markPlanning(input: WorkflowInput, status: string, progress: numb
 }
 
 async function finishPlanning(input: WorkflowInput, providerLabel: string) {
-  "use step";
   const supabase = createServiceSupabase();
   await Promise.all([
     supabase.from("generation_jobs").update({ status: "COMPLETED", progress: 100, finished_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", input.jobId),
@@ -432,7 +466,6 @@ async function finishPlanning(input: WorkflowInput, providerLabel: string) {
 }
 
 async function failPlanning(input: WorkflowInput, message: string) {
-  "use step";
   const supabase = createServiceSupabase();
   await Promise.all([
     supabase.from("books").update({ status: "FAILED", updated_at: new Date().toISOString() }).eq("id", input.bookId),
