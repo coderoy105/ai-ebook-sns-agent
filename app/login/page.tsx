@@ -39,31 +39,45 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="login">
-      <section className="panel login-card">
-        <div className="eyebrow">AI BOOK STUDIO</div>
-        <h1>책 한 권을 끝까지 관리하는 AI.</h1>
-        <p className="muted">이메일과 비밀번호로 로그인하면 프로젝트, 생성 상태, 원고와 버전이 영구 저장됩니다.</p>
+    <main className="login-stage">
+      <section className="login-story">
+        <div className="login-wordmark"><span>AI BOOK</span><strong>STUDIO</strong></div>
+        <div className="login-statement">
+          <h1>한 권의 책이 끝날 때까지,<br />작업 흐름을 놓치지 않습니다.</h1>
+          <p>아이디어를 구조로 만들고, Section별로 쓰고, 저장하고, 고치고, 최종 파일로 내보내는 출판 작업실입니다.</p>
+        </div>
+        <div className="production-sequence" aria-label="책 제작 과정">
+          <div><span>Plan</span><strong>독자와 목차 설계</strong></div>
+          <div><span>Write</span><strong>Section 단위 장문 집필</strong></div>
+          <div><span>Edit</span><strong>수정과 버전 관리</strong></div>
+          <div><span>Publish</span><strong>PDF · EPUB · DOCX</strong></div>
+        </div>
+      </section>
 
-        <div className="actions" style={{ marginBottom: 18 }}>
-          <button className={mode === "login" ? "button" : "button secondary"} onClick={() => setMode("login")}>로그인</button>
-          <button className={mode === "register" ? "button" : "button secondary"} onClick={() => setMode("register")}>회원가입</button>
+      <section className="login-form-shell">
+        <div className="login-mode" role="tablist" aria-label="계정 모드">
+          <button role="tab" aria-selected={mode === "login"} className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>로그인</button>
+          <button role="tab" aria-selected={mode === "register"} className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>회원가입</button>
+        </div>
+
+        <div className="login-form-copy">
+          <h2>{mode === "login" ? "작업실로 돌아가기" : "새 작업실 만들기"}</h2>
+          <p>{mode === "login" ? "저장된 책과 생성 상태를 이어서 작업합니다." : "계정을 만들면 프로젝트와 원고가 계속 저장됩니다."}</p>
         </div>
 
         <div className="field">
-          <label>이메일</label>
-          <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" />
+          <label htmlFor="login-email">이메일</label>
+          <input id="login-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" />
         </div>
         <div className="field">
-          <label>비밀번호</label>
-          <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="8자 이상" autoComplete={mode === "register" ? "new-password" : "current-password"} />
+          <label htmlFor="login-password">비밀번호</label>
+          <input id="login-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="8자 이상" autoComplete={mode === "register" ? "new-password" : "current-password"} />
         </div>
-        <div className="actions">
-          <button className="button" disabled={!email || password.length < 8 || loading} onClick={submit}>
-            {loading ? "처리 중…" : mode === "register" ? "계정 만들고 시작하기" : "로그인"}
-          </button>
-        </div>
-        {message && <p className="notice">{message}</p>}
+
+        <button className="button button-primary login-submit" disabled={!email || password.length < 8 || loading} onClick={submit}>
+          {loading ? "처리 중…" : mode === "register" ? "계정 만들고 시작" : "로그인"}
+        </button>
+        {message && <p className="notice" role="alert">{message}</p>}
       </section>
     </main>
   );
