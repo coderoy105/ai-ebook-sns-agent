@@ -47,7 +47,11 @@ function describeError(value: unknown) {
 }
 
 function runtimeOrigin() {
-  const hostname = process.env.VERCEL_URL?.trim() || process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
+  const productionHostname = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
+  const deploymentHostname = process.env.VERCEL_URL?.trim();
+  const hostname = process.env.VERCEL_ENV === "production"
+    ? (productionHostname || deploymentHostname)
+    : (deploymentHostname || productionHostname);
   if (!hostname) throw new Error("CODEX_RUNTIME_UNAVAILABLE");
   return hostname.startsWith("http://") || hostname.startsWith("https://") ? hostname.replace(/\/$/, "") : `https://${hostname}`;
 }
