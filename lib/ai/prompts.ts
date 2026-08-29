@@ -9,7 +9,7 @@ Budgets must add up close to the requested total. Avoid filler chapters.
 LANGUAGE POLICY: Detect the primary natural language from the user's BOOK IDEA and requirements. Every reader-facing string in the blueprint MUST stay in that same language, including title candidates, selected title/subtitle, Part titles and purposes, Chapter titles and goals, Section titles and goals, storyBible text, and knowledgeMap text. JSON/schema property names remain unchanged. If the user's idea is Korean, all reader-facing blueprint text must be natural Korean. Do not translate Korean input into English.`;
 }
 
-export function plannerPrompt(input: {
+export type PlannerInput = {
   idea: string;
   bookType: string;
   targetPages: number;
@@ -19,7 +19,9 @@ export function plannerPrompt(input: {
   knowledgeLevel: string;
   tone: string;
   templateMood: string;
-}) {
+};
+
+function plannerRequirements(input: PlannerInput) {
   const rule = getBookTypeRule(input.bookType);
   return `BOOK IDEA:
 ${input.idea}
@@ -36,11 +38,61 @@ REQUIREMENTS:
 - Genre engine rules: ${rule.rules.join(", ")}
 - Preferred chapter count: ${rule.chapterRange[0]}-${rule.chapterRange[1]}
 - Preferred sections/chapter: ${rule.sectionRange[0]}-${rule.sectionRange[1]}
-- Output language: exactly the same primary language as BOOK IDEA. Korean idea => Korean titles, subtitles, Part/Chapter/Section names, goals, purposes, and explanatory blueprint text.
+- Output language: exactly the same primary language as BOOK IDEA. Korean idea => Korean titles, subtitles, Part/Chapter/Section names, goals, purposes, and explanatory blueprint text.`;
+}
+
+export function plannerPrompt(input: PlannerInput) {
+  return `${plannerRequirements(input)}
 
 Produce at least 7 title candidates with materially different positioning. Then select one.
 Create a hierarchical Part > Chapter > Section plan. Every section needs a concrete goal, word budget, research flag, and layout hint.
 Do not write the actual book prose yet.`;
+}
+
+export function plannerSkeletonPrompt(input: PlannerInput) {
+  return `${plannerRequirements(input)}
+
+FREE MODE STAGE 1 — COMPACT BOOK SKELETON:
+- Produce 5-7 concise title candidates, then select one.
+- Create the complete Part > Chapter hierarchy, but DO NOT create Sections yet.
+- Each Chapter needs only title, goal, targetWords, and dependencies.
+- Keep every descriptive string concise. This stage must fit comfortably in a small JSON response.
+- Preserve explicit constraints from the user's idea exactly. If the idea says the story begins on day 30, the first chapter must begin on day 30, not day 1.
+- Fiction storyBible or informational knowledgeMap must be compact: only facts needed to keep later writing consistent.
+- Do not write prose and do not claim live research was performed.`;
+}
+
+export function chapterSectionsPrompt(input: {
+  form: PlannerInput;
+  selectedTitle: string;
+  coreMessage: string;
+  partTitle: string;
+  partPurpose: string;
+  chapterTitle: string;
+  chapterGoal: string;
+  chapterTargetWords: number;
+  preferredSectionMin: number;
+  preferredSectionMax: number;
+}) {
+  return `${plannerRequirements(input.form)}
+
+FREE MODE STAGE 2 — SECTIONS FOR ONE CHAPTER ONLY:
+Book: ${input.selectedTitle}
+Core message: ${input.coreMessage}
+Part: ${input.partTitle}
+Part purpose: ${input.partPurpose}
+Chapter: ${input.chapterTitle}
+Chapter goal: ${input.chapterGoal}
+Chapter target words: ${input.chapterTargetWords}
+Preferred section count: ${input.preferredSectionMin}-${input.preferredSectionMax}
+
+Create Sections ONLY for this one Chapter.
+- Return ${input.preferredSectionMin}-${input.preferredSectionMax} non-overlapping Sections when practical.
+- Section targetWords should add up close to the Chapter target words.
+- Every Section needs title, concrete goal, targetWords, researchNeeded, and a short layoutHint.
+- Preserve chronology, facts, names, and explicit constraints from the BOOK IDEA and Chapter goal.
+- Keep all reader-facing strings in the BOOK IDEA language.
+- Keep strings concise and do not write actual prose.`;
 }
 
 export function sectionWriterSystem() {
