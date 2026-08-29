@@ -10,6 +10,7 @@ type Part = { id:string; title:string; purpose:string|null; position:number; cha
 export type Book = { id:string; title:string; subtitle:string|null; idea:string; book_type:string; status:string; progress:number; target_pages:number; target_words:number; quality_score:number|null; quality_scores:Record<string,number>; parts:Part[]; book_blueprints:unknown[]; book_covers:unknown[] };
 type Revision = { id:string; revision_type:string; instruction:string|null; title_before:string|null; content_before:string|null; created_at:string };
 type GenerationLog = { id:string; created_at:string; message:string };
+type LocalSectionDraft = { content:string; updatedAt:number };
 
 function sortBook(book: Book) {
   return {
@@ -28,12 +29,44 @@ function statusLabel(status: string) {
   return status;
 }
 
+function draftKey(bookId:string, sectionId:string) {
+  return `ai-book-studio:manuscript-draft:${bookId}:${sectionId}`;
+}
+
+function readSectionDraft(bookId:string, sectionId:string):LocalSectionDraft|null {
+  if(typeof window === "undefined" || !sectionId) return null;
+  try {
+    const raw=localStorage.getItem(draftKey(bookId,sectionId));
+    if(!raw) return null;
+    const parsed=JSON.parse(raw) as LocalSectionDraft;
+    return parsed && typeof parsed.content === "string" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSectionDraft(bookId:string, sectionId:string, content:string) {
+  try {
+    localStorage.setItem(draftKey(bookId,sectionId),JSON.stringify({content,updatedAt:Date.now()} satisfies LocalSectionDraft));
+  } catch {
+    // Keep the editor usable even if browser storage is unavailable.
+  }
+}
+
+function clearSectionDraft(bookId:string, sectionId:string) {
+  try { localStorage.removeItem(draftKey(bookId,sectionId)); }
+  catch { /* no-op */ }
+}
+
 export function BookEditor({ initialBook }: { initialBook: Book }) {
   const [book,setBook] = useState(()=>sortBook(initialBook));
   const firstSection = book.parts[0]?.chapters[0]?.sections[0] ?? null;
-  const [selectedId,setSelectedId] = useState(firstSection?.id ?? "");
+  const firstSectionId = firstSection?.id ?? "";
+  const firstServerContent = firstSection?.content_markdown ?? "";
+  const [selectedId,setSelectedId] = useState(firstSectionId);
+  const selectedIdRef = useRef(firstSectionId);
   const selected = useMemo(()=>book.parts.flatMap(p=>p.chapters).flatMap(c=>c.sections).find(s=>s.id===selectedId) ?? null,[book,selectedId]);
-  const [content,setContent] = useState(firstSection?.content_markdown ?? "");
+  const [content,setContent] = useState(firstServerContent);
   const [saveState,setSaveState] = useState("saved");
   const [command,setCommand] = useState("");
   const [busy,setBusy] = useState(false);
@@ -61,28 +94,74 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
     return()=>{clearTimeout(connectionTimer);clearTimeout(initialTimer);clearInterval(timer);};
   },[refreshStatus,status.status]);
 
-  function selectSection(section:Section) {
-    setSelectedId(section.id);
-    setContent(section.content_markdown ?? "");
-    setHistory([]);
-  }
+  useEffect(()=>{
+    const timer=setTimeout(()=>{
+      if(!firstSectionId || selectedIdRef.current!==firstSectionId) return;
+      const draft=readSectionDraft(book.id,firstSectionId);
+      if(draft && draft.content!==firstServerContent){
+        setContent(draft.content);
+        setSaveState("recovered");
+      }
+    },0);
+    return()=>clearTimeout(timer);
+  },[book.id,firstSectionId,firstServerContent]);
 
   function patchLocalSection(id:string, patch:Partial<Section>) {
     setBook(prev=>({...prev,parts:prev.parts.map(part=>({...part,chapters:part.chapters.map(chapter=>({...chapter,sections:chapter.sections.map(section=>section.id===id?{...section,...patch}:section)}))}))}));
   }
 
+  async function saveSection(sectionId:string,nextContent:string) {
+    if(!sectionId) return;
+    if(selectedIdRef.current===sectionId) setSaveState("saving");
+    try {
+      const res=await fetch(`/api/sections/${sectionId}`,{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({content:nextContent})});
+      if(!res.ok){
+        if(selectedIdRef.current===sectionId) setSaveState("error");
+        return;
+      }
+      clearSectionDraft(book.id,sectionId);
+      patchLocalSection(sectionId,{content_markdown:nextContent,word_count:nextContent.trim().split(/\s+/).filter(Boolean).length});
+      if(selectedIdRef.current===sectionId) setSaveState("saved");
+    } catch {
+      if(selectedIdRef.current===sectionId) setSaveState("error");
+    }
+  }
+
   async function saveNow(nextContent=content) {
     if(!selected) return;
-    setSaveState("saving");
-    const res=await fetch(`/api/sections/${selected.id}`,{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({content:nextContent})});
-    setSaveState(res.ok?"saved":"error");
-    if(res.ok) patchLocalSection(selected.id,{content_markdown:nextContent,word_count:nextContent.trim().split(/\s+/).filter(Boolean).length});
+    await saveSection(selected.id,nextContent);
+  }
+
+  function selectSection(section:Section) {
+    if(section.id===selectedId) return;
+    if(saveTimer.current){ clearTimeout(saveTimer.current); saveTimer.current=null; }
+    if(selected && ["dirty","recovered","error"].includes(saveState)) void saveSection(selected.id,content);
+
+    selectedIdRef.current=section.id;
+    setSelectedId(section.id);
+    const serverContent=section.content_markdown ?? "";
+    const draft=readSectionDraft(book.id,section.id);
+    if(draft && draft.content!==serverContent){
+      setContent(draft.content);
+      setSaveState("recovered");
+    } else {
+      setContent(serverContent);
+      setSaveState("saved");
+    }
+    setHistory([]);
   }
 
   function changeContent(value:string) {
-    setContent(value); setSaveState("dirty");
+    setContent(value);
+    if(!selected) return;
+    writeSectionDraft(book.id,selected.id,value);
+    setSaveState("dirty");
     if(saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current=setTimeout(()=>{void saveNow(value);},1200);
+    const sectionId=selected.id;
+    saveTimer.current=setTimeout(()=>{
+      saveTimer.current=null;
+      void saveSection(sectionId,value);
+    },650);
   }
 
   async function connectFreeAi(){ await beginFreeAiConnect(`/books/${book.id}`); }
@@ -135,14 +214,15 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
     const r=await fetch(`/api/sections/${selected.id}/rewrite`,{method:"POST",headers:{"content-type":"application/json","x-openrouter-key":key},body:JSON.stringify({instruction:command})});
     const data=await r.json(); setBusy(false);
     if(!r.ok){alert(data.error==="FREE_AI_DAILY_LIMIT"?"오늘 무료 AI 한도에 도달했습니다. 다음 한도에서 다시 사용할 수 있습니다.":data.error??"Rewrite failed");return;}
-    setContent(data.markdown);patchLocalSection(selected.id,{content_markdown:data.markdown,summary:data.summary});setCommand("");void loadHistory();
+    clearSectionDraft(book.id,selected.id);
+    setContent(data.markdown);patchLocalSection(selected.id,{content_markdown:data.markdown,summary:data.summary});setSaveState("saved");setCommand("");void loadHistory();
   }
 
   async function loadHistory(){ if(!selected)return; const r=await fetch(`/api/sections/${selected.id}/revisions`); if(r.ok)setHistory((await r.json()).revisions??[]); }
-  async function restoreRevision(id:string){ if(!confirm("이 버전으로 복원할까요? 현재 내용은 새 Revision으로 보존됩니다."))return; const r=await fetch(`/api/revisions/${id}/restore`,{method:"POST"}); if(r.ok){const d=await r.json();setContent(d.content);patchLocalSection(selectedId,{content_markdown:d.content});void loadHistory();} }
+  async function restoreRevision(id:string){ if(!confirm("이 버전으로 복원할까요? 현재 내용은 새 Revision으로 보존됩니다."))return; const r=await fetch(`/api/revisions/${id}/restore`,{method:"POST"}); if(r.ok){const d=await r.json();clearSectionDraft(book.id,selectedId);setContent(d.content);patchLocalSection(selectedId,{content_markdown:d.content});setSaveState("saved");void loadHistory();} }
 
   async function rename(kind:"part"|"chapter"|"section",id:string,current:string){ const title=prompt("새 제목",current)?.trim(); if(!title||title===current)return; const r=await fetch(`/api/outline/${kind}/${id}`,{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({title})}); if(r.ok) location.reload(); }
-  async function remove(kind:"chapter"|"section",id:string){ if(!confirm("삭제하면 원고와 연결된 데이터도 함께 삭제됩니다. 계속할까요?"))return; const r=await fetch(`/api/outline/${kind}/${id}`,{method:"DELETE"}); if(r.ok)location.reload(); }
+  async function remove(kind:"chapter"|"section",id:string){ if(!confirm("삭제하면 원고와 연결된 데이터도 함께 삭제됩니다. 계속할까요?"))return; const r=await fetch(`/api/outline/${kind}/${id}`,{method:"DELETE"}); if(r.ok){ if(kind==="section") clearSectionDraft(book.id,id); location.reload(); } }
   async function add(kind:"chapter"|"section",parentId:string){ const title=prompt(`${kind === "chapter" ? "Chapter" : "Section"} 제목`)?.trim(); if(!title)return; const r=await fetch(`/api/books/${book.id}/outline`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({kind,parentId,title})}); if(r.ok)location.reload(); }
 
   async function moveSection(chapterId:string,draggedId:string,targetId:string){
@@ -184,7 +264,7 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
           <div className="editor-context"><span>{selected?.layout_hint??"MANUSCRIPT"}</span><span>{selected?.word_count ?? 0} words</span></div>
           <h2>{selected?.title??"목차에서 Section을 선택하세요"}</h2>
         </div>
-        <span className={`save-state ${saveState}`}>{saveState === "saving" ? "저장 중" : saveState === "dirty" ? "저장 대기" : saveState === "error" ? "저장 오류" : "저장됨"}</span>
+        <span className={`save-state ${saveState}`}>{saveState === "saving" ? "서버 저장 중" : saveState === "dirty" ? "기기에 임시저장됨" : saveState === "recovered" ? "임시저장 복원됨" : saveState === "error" ? "서버 저장 오류 · 기기에는 보관됨" : "저장됨"}</span>
       </div>
       <article className="page">{selected?<textarea aria-label="section manuscript" value={content} onChange={(e)=>changeContent(e.target.value)} placeholder="이 Section의 원고가 여기에 표시됩니다."/>:<p className="muted">왼쪽 목차에서 편집할 Section을 선택하세요.</p>}</article>
     </main>
