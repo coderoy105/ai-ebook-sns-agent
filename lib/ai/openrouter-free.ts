@@ -39,7 +39,7 @@ type AttemptPlan = { model: string; mode: AttemptMode };
 type FailedAttempt = {
   model: string;
   mode: AttemptMode;
-  kind: "http" | "empty" | "json" | "schema" | "provider";
+  kind: "http" | "empty" | "json" | "schema" | "provider" | "timeout";
   status?: number;
   finishReason?: string | null;
   requestId?: string;
@@ -48,17 +48,19 @@ type FailedAttempt = {
 
 export const OPENROUTER_FREE_MODEL = "openrouter/free";
 
-// Baseline fallback when model discovery itself is unavailable. The free router is
-// intentionally retried with progressively looser formatting requirements.
+// One generic router attempt is enough after two discovered-model attempts. This
+// matters on the 50 requests/day free tier because failed retries may consume the
+// same daily budget as successful calls.
 export const OPENROUTER_FREE_ATTEMPTS: readonly AttemptPlan[] = [
-  { model: OPENROUTER_FREE_MODEL, mode: "schema" },
-  { model: OPENROUTER_FREE_MODEL, mode: "json" },
   { model: OPENROUTER_FREE_MODEL, mode: "plain" }
 ] as const;
 
 let cachedFreeModels: { expiresAt: number; models: OpenRouterModel[] } | null = null;
 const MODEL_CACHE_MS = 5 * 60 * 1000;
-const MAX_DISCOVERED_ATTEMPTS = 4;
+const MODEL_DISCOVERY_TIMEOUT_MS = 6_000;
+const GENERATION_ATTEMPT_TIMEOUT_MS = 65_000;
+const MAX_DISCOVERED_ATTEMPTS = 2;
+const MAX_TOTAL_ATTEMPTS = 3;
 
 export function normalizeOpenRouterContent(content: OpenRouterMessage["content"]): string {
   if (typeof content === "string") return content.trim();
@@ -92,9 +94,12 @@ export function parseOpenRouterJson(content: string): unknown {
 }
 
 function outputBudget(schemaName: string) {
-  if (/blueprint|planner/i.test(schemaName)) return 14000;
-  if (/section|rewrite/i.test(schemaName)) return 9000;
-  return 7000;
+  // Huge output budgets make free endpoints much slower and increase the chance
+  // that Vercel reaches its 300 second function timeout. A blueprint is an
+  // outline, not prose, so 6.5k output tokens is deliberately enough here.
+  if (/blueprint|planner/i.test(schemaName)) return 6500;
+  if (/section|rewrite/i.test(schemaName)) return 5000;
+  return 4000;
 }
 
 function safeProviderError(message: string | undefined) {
@@ -141,47 +146,74 @@ function supportsStructuredOutput(model: OpenRouterModel) {
   return parameters.includes("structured_outputs") || parameters.includes("response_format");
 }
 
+function modelPreferenceScore(model: OpenRouterModel) {
+  const id = model.id?.toLowerCase() ?? "";
+  let score = supportsStructuredOutput(model) ? 30 : 0;
+
+  // On a free shared provider, smaller / latency-oriented variants are much more
+  // useful for a structured planning request than 120B-550B models that can sit
+  // in an upstream queue for minutes.
+  if (/lightning|flash|mini|small|fast/.test(id)) score += 70;
+  if (/(?:^|[-_/])(?:7|8|9|12|14|20|24|27|30|32|35|40)b(?:[-_/.:]|$)/.test(id)) score += 35;
+  if (/ultra|550b|405b|400b|235b|120b/.test(id)) score -= 90;
+  if ((model.context_length ?? 0) >= 64_000) score += 5;
+
+  return score;
+}
+
 export function selectFreeModelAttempts(models: OpenRouterModel[], schemaName: string): AttemptPlan[] {
   const budget = outputBudget(schemaName);
   const candidates = models.filter(isFreeModel);
   const roomy = candidates.filter((model) => {
     const max = model.top_provider?.max_completion_tokens;
-    return !max || max >= Math.min(budget, 7000);
+    return !max || max >= Math.min(budget, 5000);
   });
-  const pool = roomy.length >= 2 ? roomy : candidates;
+  const pool = (roomy.length >= 2 ? roomy : candidates)
+    .slice()
+    .sort((a, b) => modelPreferenceScore(b) - modelPreferenceScore(a));
+
   const attempts: AttemptPlan[] = [];
-  const used = new Set<string>();
+  const structured = pool.find((model) => supportsStructuredOutput(model) && model.id);
+  if (structured?.id) attempts.push({ model: structured.id, mode: "schema" });
 
-  for (const model of pool) {
-    if (!supportsStructuredOutput(model) || !model.id || used.has(model.id)) continue;
-    attempts.push({ model: model.id, mode: "schema" });
-    used.add(model.id);
-    if (attempts.length >= 2) break;
-  }
-
-  for (const model of pool) {
-    if (!model.id || used.has(model.id)) continue;
-    attempts.push({ model: model.id, mode: "plain" });
-    used.add(model.id);
-    if (attempts.length >= MAX_DISCOVERED_ATTEMPTS) break;
-  }
-
-  // If the only good current model already appeared in schema mode, retry it once
-  // without capability constraints before falling back to the router.
-  if (attempts.length < MAX_DISCOVERED_ATTEMPTS && attempts[0]?.model) {
-    attempts.push({ model: attempts[0].model, mode: "plain" });
-  }
+  const second = pool.find((model) => model.id && model.id !== structured?.id);
+  if (second?.id) attempts.push({ model: second.id, mode: "plain" });
+  else if (structured?.id) attempts.push({ model: structured.id, mode: "plain" });
 
   return attempts.slice(0, MAX_DISCOVERED_ATTEMPTS);
+}
+
+function createTimedSignal(parent: AbortSignal | undefined, timeoutMs: number) {
+  const controller = new AbortController();
+  let timedOut = false;
+  const onParentAbort = () => controller.abort(parent?.reason);
+
+  if (parent?.aborted) controller.abort(parent.reason);
+  else parent?.addEventListener("abort", onParentAbort, { once: true });
+
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort(new Error("FREE_AI_ATTEMPT_TIMEOUT"));
+  }, timeoutMs);
+
+  return {
+    signal: controller.signal,
+    timedOut: () => timedOut,
+    cleanup() {
+      clearTimeout(timer);
+      parent?.removeEventListener("abort", onParentAbort);
+    }
+  };
 }
 
 async function discoverFreeModels(apiKey: string, signal?: AbortSignal): Promise<OpenRouterModel[]> {
   if (cachedFreeModels && cachedFreeModels.expiresAt > Date.now()) return cachedFreeModels.models;
 
+  const guard = createTimedSignal(signal, MODEL_DISCOVERY_TIMEOUT_MS);
   try {
     const response = await fetch("https://openrouter.ai/api/v1/models?output_modalities=text&sort=most-popular", {
       headers: { authorization: `Bearer ${apiKey}` },
-      signal
+      signal: guard.signal
     });
     if (!response.ok) {
       console.warn("[free-ai] model discovery failed", { status: response.status });
@@ -194,8 +226,10 @@ async function discoverFreeModels(apiKey: string, signal?: AbortSignal): Promise
     return models;
   } catch (error) {
     if (signal?.aborted) throw error;
-    console.warn("[free-ai] model discovery unavailable");
+    console.warn("[free-ai] model discovery unavailable", { timedOut: guard.timedOut() });
     return [];
+  } finally {
+    guard.cleanup();
   }
 }
 
@@ -203,6 +237,7 @@ function jsonOnlyInstruction<T>(request: StructuredRequest<T>) {
   return [
     request.system,
     "Return only one valid JSON value. Do not use Markdown fences or explanatory text.",
+    "Keep descriptive strings concise so the response finishes quickly.",
     "The JSON must satisfy this schema exactly:",
     JSON.stringify(request.jsonSchema)
   ].join("\n\n");
@@ -252,10 +287,11 @@ export class OpenRouterFreeProvider implements LlmProvider {
 
     const discovered = await discoverFreeModels(this.apiKey, request.signal);
     const liveAttempts = selectFreeModelAttempts(discovered, request.schemaName);
-    const attempts = [...liveAttempts, ...OPENROUTER_FREE_ATTEMPTS];
+    const attempts = [...liveAttempts, ...OPENROUTER_FREE_ATTEMPTS].slice(0, MAX_TOTAL_ATTEMPTS);
 
     for (const attempt of attempts) {
       totalAttempts += 1;
+      const guard = createTimedSignal(request.signal, GENERATION_ATTEMPT_TIMEOUT_MS);
       let response: Response;
       try {
         response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -268,13 +304,19 @@ export class OpenRouterFreeProvider implements LlmProvider {
             "x-openrouter-metadata": "enabled"
           },
           body: JSON.stringify(buildRequestBody(request, attempt)),
-          signal: request.signal
+          signal: guard.signal
         });
       } catch (error) {
         if (request.signal?.aborted) throw error;
         lastFailure = "FREE_AI_TEMPORARILY_UNAVAILABLE";
-        logFailedAttempt({ model: attempt.model, mode: attempt.mode, kind: "provider" });
+        logFailedAttempt({
+          model: attempt.model,
+          mode: attempt.mode,
+          kind: guard.timedOut() ? "timeout" : "provider"
+        });
         continue;
+      } finally {
+        guard.cleanup();
       }
 
       const requestId = response.headers.get("x-request-id") ?? undefined;
@@ -296,6 +338,9 @@ export class OpenRouterFreeProvider implements LlmProvider {
         if (isRateLimited(providerError, response.status)) {
           rateLimitedAttempts += 1;
           lastFailure = "FREE_AI_DAILY_LIMIT";
+          // A second rate-limit response is strong evidence that the account-level
+          // free quota is exhausted. Stop instead of burning the remaining retry.
+          if (rateLimitedAttempts >= 2) throw new Error("FREE_AI_DAILY_LIMIT");
         } else {
           lastFailure = "FREE_AI_TEMPORARILY_UNAVAILABLE";
         }
@@ -308,6 +353,7 @@ export class OpenRouterFreeProvider implements LlmProvider {
         if (isRateLimited(providerError)) {
           rateLimitedAttempts += 1;
           lastFailure = "FREE_AI_DAILY_LIMIT";
+          if (rateLimitedAttempts >= 2) throw new Error("FREE_AI_DAILY_LIMIT");
         } else {
           lastFailure = choice?.finish_reason === "length" ? "FREE_AI_TRUNCATED_RESPONSE" : "FREE_AI_TEMPORARILY_UNAVAILABLE";
         }
