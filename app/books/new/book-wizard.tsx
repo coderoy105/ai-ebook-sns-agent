@@ -67,7 +67,7 @@ const initial: FormState = {
   targetPages: 120,
   templateMood: "modern-editorial",
   mode: "quick",
-  aiProvider: "codex"
+  aiProvider: "openrouter"
 };
 
 function clampStep(value: number) {
@@ -127,6 +127,7 @@ export function BookWizard() {
   const [error, setError] = useState("");
   const [freeConnected, setFreeConnected] = useState(false);
   const [codexConnected, setCodexConnected] = useState(false);
+  const [codexWorkerAvailable, setCodexWorkerAvailable] = useState<boolean | null>(null);
   const [codexPlanType, setCodexPlanType] = useState<string | null>(null);
   const [codexModelAvailable, setCodexModelAvailable] = useState<boolean | null>(null);
   const [codexConnecting, setCodexConnecting] = useState(false);
@@ -147,6 +148,7 @@ export function BookWizard() {
       void getCodexConnectionStatus()
         .then((status) => {
           setCodexConnected(status.connected === true);
+          setCodexWorkerAvailable(status.workerConfigured !== false);
           setCodexPlanType(status.planType ?? null);
           setCodexModelAvailable(status.modelAvailable ?? null);
         })
@@ -207,6 +209,10 @@ export function BookWizard() {
 
   async function connectCodex() {
     setError("");
+    if (codexWorkerAvailable === false) {
+      setError("ChatGPT Plus 연결 서버가 아직 준비되지 않았습니다. 현재는 OpenRouter Free를 사용해 주세요.");
+      return;
+    }
     setCodexConnecting(true);
     setDevicePrompt(null);
     persistDraft(form, step);
@@ -352,7 +358,7 @@ export function BookWizard() {
           <span className="status-dot" aria-hidden="true" />
           <div>
             <strong>{selectedConnected ? `${selectedLabel} 연결됨` : `${selectedLabel} 연결 필요`}</strong>
-            <small>{form.aiProvider === "codex" ? `${codexPlanType ?? "ChatGPT"} · Codex OAuth · Vercel + Vault` : "OpenRouter · 서버 Vault"}</small>
+            <small>{form.aiProvider === "codex" ? (codexWorkerAvailable === false ? "Codex Worker 미연결 · 현재 선택 불가" : `${codexPlanType ?? "ChatGPT"} · Codex OAuth · Worker CODEX_HOME`) : "OpenRouter · 서버 Vault"}</small>
           </div>
         </div>
       </aside>
@@ -363,7 +369,7 @@ export function BookWizard() {
           {form.aiProvider === "codex" ? (
             codexConnected
               ? <button className="button secondary compact" disabled={loading || codexConnecting} onClick={disconnectCodex}>ChatGPT 연결 해제</button>
-              : <button className="button button-primary compact" disabled={loading || codexConnecting} onClick={connectCodex}>{codexConnecting ? "ChatGPT 로그인 대기 중…" : "ChatGPT Plus 연결"}</button>
+              : <button className="button button-primary compact" disabled={loading || codexConnecting || codexWorkerAvailable === false} onClick={connectCodex}>{codexWorkerAvailable === false ? "Codex Worker 준비 중" : codexConnecting ? "ChatGPT 로그인 대기 중…" : "ChatGPT Plus 연결"}</button>
           ) : (
             freeConnected
               ? <button className="button secondary compact" disabled={loading} onClick={disconnectFreeAi}>무료 AI 연결 해제</button>
@@ -439,9 +445,9 @@ export function BookWizard() {
             <div className="wizard-section review-section">
               <p className="wizard-lead">책을 만들 AI를 선택합니다. GPT-5.6 Luna는 API 키가 아니라 ChatGPT/Codex OAuth를 사용하고, OpenRouter Free는 기존 무료 fallback입니다.</p>
               <div className="choice-grid">
-                <button className={`choice-tile ${form.aiProvider === "codex" ? "active" : ""}`} onClick={() => update("aiProvider", "codex")}>
+                <button disabled={codexWorkerAvailable === false} className={`choice-tile ${form.aiProvider === "codex" ? "active" : ""}`} onClick={() => update("aiProvider", "codex")}>
                   <strong>GPT-5.6 Luna · ChatGPT Plus</strong>
-                  <span>{codexConnected ? `${codexPlanType ?? "ChatGPT"} 연결됨` : "API 키 불필요 · Codex OAuth"}</span>
+                  <span>{codexWorkerAvailable === false ? "Codex Worker 연결 후 사용 가능" : codexConnected ? `${codexPlanType ?? "ChatGPT"} 연결됨` : "API 키 불필요 · Codex OAuth"}</span>
                 </button>
                 <button className={`choice-tile ${form.aiProvider === "openrouter" ? "active" : ""}`} onClick={() => update("aiProvider", "openrouter")}>
                   <strong>OpenRouter Free</strong>
@@ -452,8 +458,8 @@ export function BookWizard() {
               {form.aiProvider === "codex" && !codexConnected && (
                 <div className="research-note">
                   <strong>ChatGPT Plus 연결</strong>
-                  <p>버튼을 누르면 OpenAI의 Codex 기기 로그인 페이지가 새 탭으로 열립니다. 로그인 후 표시된 코드를 입력하면 인증정보는 브라우저에 저장하지 않고 Supabase Vault에 암호화 저장한 뒤, 생성 요청마다 Vercel의 임시 CODEX_HOME에 복원합니다.</p>
-                  <button className="button button-primary compact" disabled={codexConnecting} onClick={connectCodex}>{codexConnecting ? "로그인 완료를 기다리는 중…" : "ChatGPT Plus 연결"}</button>
+                  <p>{codexWorkerAvailable === false ? "현재 지속 실행 Codex Worker가 연결되지 않아 ChatGPT Plus 로그인을 시작할 수 없습니다. OpenRouter Free는 바로 사용할 수 있습니다." : "버튼을 누르면 OpenAI의 Codex 기기 로그인 페이지가 새 탭으로 열립니다. 인증정보는 브라우저나 Supabase에 저장하지 않고 사용자별 Worker CODEX_HOME에서 관리합니다."}</p>
+                  <button className="button button-primary compact" disabled={codexConnecting || codexWorkerAvailable === false} onClick={connectCodex}>{codexWorkerAvailable === false ? "Codex Worker 준비 중" : codexConnecting ? "로그인 완료를 기다리는 중…" : "ChatGPT Plus 연결"}</button>
                 </div>
               )}
 
@@ -469,7 +475,7 @@ export function BookWizard() {
               {form.aiProvider === "codex" && codexConnected && (
                 <div className="research-note">
                   <strong>GPT-5.6 Luna 준비됨</strong>
-                  <p>{codexPlanType ? `ChatGPT 플랜: ${codexPlanType} · ` : ""}{codexModelAvailable === false ? "이 계정에서는 Luna 모델이 보이지 않습니다." : "Codex OAuth가 Vercel 서버리스 런타임에 연결되어 있습니다. ChatGPT/Codex 사용 한도를 사용합니다."}</p>
+                  <p>{codexPlanType ? `ChatGPT 플랜: ${codexPlanType} · ` : ""}{codexModelAvailable === false ? "이 계정에서는 Luna 모델이 보이지 않습니다." : "Codex OAuth가 사용자별 Worker CODEX_HOME에 연결되어 있습니다. ChatGPT/Codex 사용 한도를 사용합니다."}</p>
                 </div>
               )}
 
