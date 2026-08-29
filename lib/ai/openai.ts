@@ -13,7 +13,6 @@ type OpenAIResponsePayload = {
 type AiEndpoint = {
   token: string;
   baseUrl: string;
-  gateway: boolean;
 };
 
 async function endpoint(): Promise<AiEndpoint> {
@@ -21,38 +20,23 @@ async function endpoint(): Promise<AiEndpoint> {
   if (gatewayApiKey) {
     return {
       token: gatewayApiKey,
-      baseUrl: "https://ai-gateway.vercel.sh/v1",
-      gateway: true
+      baseUrl: "https://ai-gateway.vercel.sh/v1"
     };
   }
 
-  // On Vercel, OIDC is supplied through the request context rather than a
-  // normal process.env value. The helper handles both production request
-  // context and VERCEL_OIDC_TOKEN for local/CLI environments.
   const oidcToken = await getVercelOidcToken();
   if (oidcToken) {
     return {
       token: oidcToken,
-      baseUrl: "https://ai-gateway.vercel.sh/v1",
-      gateway: true
+      baseUrl: "https://ai-gateway.vercel.sh/v1"
     };
   }
 
-  const openAiKey = process.env.OPENAI_API_KEY;
-  if (openAiKey) {
-    return {
-      token: openAiKey,
-      baseUrl: "https://api.openai.com/v1",
-      gateway: false
-    };
-  }
-
-  throw new Error("No AI provider credential is available. Configure Vercel AI Gateway OIDC/AI_GATEWAY_API_KEY or OPENAI_API_KEY.");
+  throw new Error("No Vercel AI Gateway credential is available. Configure Vercel OIDC or AI_GATEWAY_API_KEY.");
 }
 
-function routedModel(model: string, gateway: boolean) {
-  if (!gateway || model.includes("/")) return model;
-  return `openai/${model}`;
+function routedModel(model: string) {
+  return model.includes("/") ? model : `openai/${model}`;
 }
 
 function extractText(payload: OpenAIResponsePayload): string {
@@ -69,7 +53,7 @@ export class OpenAIResponsesProvider implements LlmProvider {
   async generateStructured<T>(request: StructuredRequest<T>): Promise<StructuredResponse<T>> {
     const started = Date.now();
     const ai = await endpoint();
-    const model = routedModel(request.model, ai.gateway);
+    const model = routedModel(request.model);
     const response = await fetch(`${ai.baseUrl}/responses`, {
       method: "POST",
       headers: {
@@ -124,7 +108,7 @@ export class OpenAIResponsesProvider implements LlmProvider {
   async embed(input: string) {
     const ai = await endpoint();
     const configured = process.env.OPENAI_EMBEDDING_MODEL ?? "text-embedding-3-small";
-    const model = routedModel(configured, ai.gateway);
+    const model = routedModel(configured);
     const response = await fetch(`${ai.baseUrl}/embeddings`, {
       method: "POST",
       headers: {
