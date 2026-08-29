@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { beginFreeAiConnect, getFreeAiKey } from "@/lib/ai/openrouter-browser";
 import { connectCodexChatGPT, getCodexConnectionStatus, type CodexDeviceEvent } from "@/lib/ai/codex-browser";
+import { ChatGptDeviceCodePanel } from "@/components/chatgpt-device-code-panel";
 import { PagedManuscriptEditor } from "./paged-manuscript-editor";
 
 type Section = { id:string; title:string; goal:string|null; position:number; status:string; target_words:number; word_count:number; content_markdown:string|null; summary:string|null; layout_hint:string|null };
@@ -174,7 +175,7 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
   async function connectCodex(){
     setCodexConnecting(true);setDevicePrompt(null);
     try{
-      const result=await connectCodexChatGPT({onEvent(event:CodexDeviceEvent){if(event.type==="device_code")setDevicePrompt({verificationUrl:event.verificationUrl,userCode:event.userCode});}});
+      const result=await connectCodexChatGPT({openVerificationPage:false,onEvent(event:CodexDeviceEvent){if(event.type==="device_code")setDevicePrompt({verificationUrl:event.verificationUrl,userCode:event.userCode});}});
       if(!result.modelAvailable) throw new Error("이 ChatGPT 계정에서 GPT-5.6 Luna를 사용할 수 없습니다.");
       setCodexConnected(true);setDevicePrompt(null);await refreshStatus();
     }catch(error){alert(error instanceof Error?error.message:"ChatGPT Plus 연결에 실패했습니다.");}
@@ -306,7 +307,7 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
               ? `${providerLabel}가 서버에 연결되어 있어 백그라운드 생성이 가능합니다.`
               : `${providerLabel} 연결이 필요합니다.`}</p>
 
-        {devicePrompt&&<div className="research-note"><strong>OpenAI에서 로그인을 완료해 주세요</strong><p>OpenAI 공식 인증 화면에서 “Codex CLI”라는 문구가 표시될 수 있습니다. 이는 정상이며 터미널을 직접 사용할 필요는 없습니다. 인증 코드가 필요하면 자동 복사된 코드를 붙여넣으세요. 완료되면 이 화면이 자동으로 연결을 확인합니다.</p><div className="panel-actions"><a className="button button-primary compact" href={devicePrompt.verificationUrl} target="_blank" rel="noreferrer">OpenAI 로그인 계속하기</a><button className="button secondary compact" onClick={()=>void navigator.clipboard?.writeText(devicePrompt.userCode)}>인증 코드 다시 복사</button></div><small>필요한 경우 코드: {devicePrompt.userCode}</small></div>}
+        {devicePrompt&&<ChatGptDeviceCodePanel verificationUrl={devicePrompt.verificationUrl} userCode={devicePrompt.userCode}/>}
         <div className="panel-actions">
           {(!providerConnected||needsReconnect)&&<button className="button button-primary" disabled={codexConnecting} onClick={connectCurrentProvider}>{codexConnecting?"OpenAI 로그인 완료를 기다리는 중…":aiProvider==="codex"?"ChatGPT로 계속하기":`${providerLabel} ${needsReconnect?"다시 ":""}연결`}</button>}
           {providerConnected&&!backgroundRunning&&status.status!=="COMPLETED"&&status.status!=="PAUSED"&&!busy&&<button className="button button-primary" onClick={startGeneration}>{status.progress>0?"백그라운드 이어서 생성":"백그라운드 책 생성 시작"}</button>}

@@ -9,6 +9,7 @@ import {
   getCodexConnectionStatus,
   type CodexDeviceEvent
 } from "@/lib/ai/codex-browser";
+import { ChatGptDeviceCodePanel } from "@/components/chatgpt-device-code-panel";
 
 const bookTypes = ["AI / 실용서","비즈니스 / 창업","교육용","기술서","미스터리 로맨스","SF 미스터리","에세이","아동용","매뉴얼 / 튜토리얼"];
 const tones = ["친근한 교육형","전문적이지만 읽기 쉬운","차분하고 신뢰감 있는","따뜻하고 감성적인","강렬하고 설득력 있는","대화형","이야기형"];
@@ -219,7 +220,7 @@ export function BookWizard() {
     persistDraft(form, step);
     try {
       const connected = await connectCodexChatGPT({
-        openVerificationPage: true,
+        openVerificationPage: false,
         onEvent(event: CodexDeviceEvent) {
           if (event.type === "device_code") {
             setDevicePrompt({ verificationUrl: event.verificationUrl, userCode: event.userCode });
@@ -464,15 +465,7 @@ export function BookWizard() {
               )}
 
               {devicePrompt && (
-                <div className="research-note" aria-live="polite">
-                  <strong>OpenAI에서 로그인을 완료해 주세요</strong>
-                  <p>OpenAI 공식 인증 화면에서 “Codex CLI”라는 문구가 표시될 수 있습니다. 우리 서버의 Codex 세션에 ChatGPT 권한을 연결하는 정상 화면이며, 터미널에서 명령어를 입력할 필요는 없습니다. OpenAI가 인증 코드를 요청하면 자동 복사된 코드를 붙여넣으세요. 완료되면 이 화면이 자동으로 연결 상태를 확인합니다.</p>
-                  <div className="panel-actions">
-                    <a className="button button-primary compact" href={devicePrompt.verificationUrl} target="_blank" rel="noreferrer">OpenAI 로그인 계속하기</a>
-                    <button className="button secondary compact" onClick={() => void navigator.clipboard?.writeText(devicePrompt.userCode)}>인증 코드 다시 복사</button>
-                  </div>
-                  <small>코드가 자동으로 복사되지 않았다면: {devicePrompt.userCode}</small>
-                </div>
+                <ChatGptDeviceCodePanel verificationUrl={devicePrompt.verificationUrl} userCode={devicePrompt.userCode} />
               )}
 
               {form.aiProvider === "codex" && codexConnected && (
