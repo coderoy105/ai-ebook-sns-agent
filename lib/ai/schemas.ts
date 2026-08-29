@@ -22,7 +22,7 @@ export const WritingStyleSchema = z.object({
   narrativeSpeed: z.number().min(1).max(10)
 });
 
-const SectionPlanSchema = z.object({
+export const SectionPlanSchema = z.object({
   title: z.string(),
   goal: z.string(),
   targetWords: z.number().int().positive(),
@@ -30,28 +30,33 @@ const SectionPlanSchema = z.object({
   layoutHint: z.string()
 });
 
-const ChapterPlanSchema = z.object({
-  title: z.string(),
-  goal: z.string(),
-  targetWords: z.number().int().positive(),
-  dependencies: z.array(z.string()),
+export const ChapterSectionsSchema = z.object({
   sections: z.array(SectionPlanSchema).min(1)
 });
 
-const PartPlanSchema = z.object({
+export const ChapterSkeletonSchema = z.object({
   title: z.string(),
-  purpose: z.string(),
-  chapters: z.array(ChapterPlanSchema).min(1)
+  goal: z.string(),
+  targetWords: z.number().int().positive(),
+  dependencies: z.array(z.string())
 });
 
-export const BookBlueprintSchema = z.object({
-  titleCandidates: z.array(z.object({
-    title: z.string(),
-    subtitle: z.string(),
-    style: z.string(),
-    reason: z.string(),
-    targetReaction: z.string()
-  })).min(5),
+export const PartSkeletonSchema = z.object({
+  title: z.string(),
+  purpose: z.string(),
+  chapters: z.array(ChapterSkeletonSchema).min(1)
+});
+
+const TitleCandidateSchema = z.object({
+  title: z.string(),
+  subtitle: z.string(),
+  style: z.string(),
+  reason: z.string(),
+  targetReaction: z.string()
+});
+
+export const BookBlueprintSkeletonSchema = z.object({
+  titleCandidates: z.array(TitleCandidateSchema).min(5),
   selectedTitle: z.string(),
   selectedSubtitle: z.string(),
   bookGoal: z.string(),
@@ -64,9 +69,23 @@ export const BookBlueprintSchema = z.object({
   expectedWords: z.number().int().positive(),
   bookType: z.string(),
   templateRecommendations: z.array(z.string()).min(1),
-  parts: z.array(PartPlanSchema).min(1),
+  parts: z.array(PartSkeletonSchema).min(1),
   storyBible: z.record(z.string(), z.unknown()).nullable(),
   knowledgeMap: z.record(z.string(), z.unknown()).nullable()
+});
+
+const ChapterPlanSchema = ChapterSkeletonSchema.extend({
+  sections: z.array(SectionPlanSchema).min(1)
+});
+
+const PartPlanSchema = z.object({
+  title: z.string(),
+  purpose: z.string(),
+  chapters: z.array(ChapterPlanSchema).min(1)
+});
+
+export const BookBlueprintSchema = BookBlueprintSkeletonSchema.extend({
+  parts: z.array(PartPlanSchema).min(1)
 });
 
 export const SectionDraftSchema = z.object({
@@ -109,5 +128,7 @@ export const ReviewSchema = z.object({
   }))
 });
 
+export type BookBlueprintSkeleton = z.infer<typeof BookBlueprintSkeletonSchema>;
+export type ChapterSections = z.infer<typeof ChapterSectionsSchema>;
 export type BookBlueprint = z.infer<typeof BookBlueprintSchema>;
 export type SectionDraft = z.infer<typeof SectionDraftSchema>;
