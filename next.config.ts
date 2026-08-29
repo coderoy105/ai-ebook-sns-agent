@@ -15,6 +15,7 @@ const nextConfig: NextConfig = {
       { source: "/api/books/:id/generate-free", destination: "/api/core/books/:id/generate" },
       { source: "/api/books/:id/plan", destination: "/api/core/books/:id/plan" },
       { source: "/api/health/service-bridge", destination: "/api/core/health/service-bridge" },
+      { source: "/api/health/codex-sandbox-probe-72f46d0e", destination: "/api/core/health/codex-sandbox-probe-72f46d0e" },
       { source: "/api/books/:id/control", destination: "/api/core/editor/book/:id/control" },
       { source: "/api/books/:id/outline", destination: "/api/core/editor/book/:id/outline" },
       { source: "/api/books/:id/status", destination: "/api/core/editor/book/:id/status" },
