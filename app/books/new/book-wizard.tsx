@@ -352,7 +352,7 @@ export function BookWizard() {
           <span className="status-dot" aria-hidden="true" />
           <div>
             <strong>{selectedConnected ? `${selectedLabel} 연결됨` : `${selectedLabel} 연결 필요`}</strong>
-            <small>{form.aiProvider === "codex" ? `${codexPlanType ?? "ChatGPT"} · Codex OAuth · Worker CODEX_HOME` : "OpenRouter · 서버 Vault"}</small>
+            <small>{form.aiProvider === "codex" ? `${codexPlanType ?? "ChatGPT"} · Codex OAuth · Vercel + Vault` : "OpenRouter · 서버 Vault"}</small>
           </div>
         </div>
       </aside>
@@ -452,7 +452,7 @@ export function BookWizard() {
               {form.aiProvider === "codex" && !codexConnected && (
                 <div className="research-note">
                   <strong>ChatGPT Plus 연결</strong>
-                  <p>버튼을 누르면 OpenAI의 Codex 기기 로그인 페이지가 새 탭으로 열립니다. 로그인 후 표시된 코드를 입력하면 인증정보는 브라우저나 Supabase에 저장되지 않고 Codex Worker의 사용자별 CODEX_HOME에서 관리됩니다.</p>
+                  <p>버튼을 누르면 OpenAI의 Codex 기기 로그인 페이지가 새 탭으로 열립니다. 로그인 후 표시된 코드를 입력하면 인증정보는 브라우저에 저장하지 않고 Supabase Vault에 암호화 저장한 뒤, 생성 요청마다 Vercel의 임시 CODEX_HOME에 복원합니다.</p>
                   <button className="button button-primary compact" disabled={codexConnecting} onClick={connectCodex}>{codexConnecting ? "로그인 완료를 기다리는 중…" : "ChatGPT Plus 연결"}</button>
                 </div>
               )}
@@ -469,7 +469,7 @@ export function BookWizard() {
               {form.aiProvider === "codex" && codexConnected && (
                 <div className="research-note">
                   <strong>GPT-5.6 Luna 준비됨</strong>
-                  <p>{codexPlanType ? `ChatGPT 플랜: ${codexPlanType} · ` : ""}{codexModelAvailable === false ? "이 계정에서는 Luna 모델이 보이지 않습니다." : "Codex OAuth가 사용자별 Worker CODEX_HOME에 연결되어 있습니다. ChatGPT/Codex 사용 한도를 사용합니다."}</p>
+                  <p>{codexPlanType ? `ChatGPT 플랜: ${codexPlanType} · ` : ""}{codexModelAvailable === false ? "이 계정에서는 Luna 모델이 보이지 않습니다." : "Codex OAuth가 Vercel 서버리스 런타임에 연결되어 있습니다. ChatGPT/Codex 사용 한도를 사용합니다."}</p>
                 </div>
               )}
 
