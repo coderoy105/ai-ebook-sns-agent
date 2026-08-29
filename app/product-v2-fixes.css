@@ -1,0 +1,48 @@
+/* Contrast fixes for intentionally inverse brand-only surfaces. */
+.login-story,
+.not-found-stage {
+  background: #1b1d18;
+  color: #ffffff;
+}
+
+.login-story .product-mark,
+.login-story .product-mark-copy strong,
+.not-found-stage .product-mark,
+.not-found-stage .product-mark-copy strong,
+.login-statement h1,
+.not-found-copy h1 {
+  color: #ffffff;
+}
+
+.login-story .product-mark-copy small,
+.not-found-stage .product-mark-copy small {
+  color: #969e91;
+}
+
+.login-statement p,
+.not-found-copy p {
+  color: #c2c7be;
+}
+
+.production-sequence {
+  border-top-color: #383c34;
+}
+
+.production-sequence div {
+  border-right-color: #383c34;
+}
+
+.production-sequence span,
+.production-sequence small {
+  color: #8e9789;
+}
+
+.production-sequence strong {
+  color: #f4f6f1;
+}
+
+@media (max-width: 720px) {
+  .production-sequence div:nth-child(n + 3) {
+    border-top-color: #383c34;
+  }
+}
