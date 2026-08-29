@@ -13,8 +13,8 @@ export default function OpenRouterCallbackPage() {
     const verifier = getOpenRouterVerifier();
     const returnTo = getOpenRouterReturnPath();
     if (!code || !verifier) {
-      setMessage("무료 AI 연결 정보가 만료되었습니다. 책 화면에서 다시 연결해주세요.");
-      return;
+      const timer = setTimeout(() => setMessage("무료 AI 연결 정보가 만료되었습니다. 책 화면에서 다시 연결해주세요."), 0);
+      return () => clearTimeout(timer);
     }
 
     void (async () => {
