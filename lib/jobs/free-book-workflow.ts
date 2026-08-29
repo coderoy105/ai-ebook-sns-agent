@@ -168,9 +168,10 @@ async function generateFreeSectionStep(input: WorkflowInput & { sectionId: strin
     .select("title,summary")
     .eq("book_id", input.bookId)
     .eq("status", "COMPLETED")
-    .is("summary", false)
     .order("updated_at", { ascending: false })
     .limit(8);
+
+  const previousSummaries = (previousRows ?? []).filter((row) => typeof row.summary === "string" && row.summary.trim().length > 0);
 
   await Promise.all([
     supabase.from("sections").update({ status: "GENERATING" }).eq("id", section.id),
@@ -193,8 +194,8 @@ async function generateFreeSectionStep(input: WorkflowInput & { sectionId: strin
         targetWords: Math.min(Math.max(section.target_words, 500), 2200),
         readerProfile: one(book.reader_profiles) ?? {},
         writingStyle: one(book.writing_styles) ?? {},
-        relevantMemory: (previousRows ?? []).map((row) => ({ type: "previous_section", title: row.title, content: row.summary })),
-        previousSectionSummary: previousRows?.[0]?.summary ?? undefined,
+        relevantMemory: previousSummaries.map((row) => ({ type: "previous_section", title: row.title, content: row.summary })),
+        previousSectionSummary: previousSummaries[0]?.summary ?? undefined,
         researchNotes: "None — free mode does not perform live research.",
         storyBible: one(book.story_bibles)?.data ?? null,
         knowledgeMap: one(book.knowledge_maps)?.data ?? null
