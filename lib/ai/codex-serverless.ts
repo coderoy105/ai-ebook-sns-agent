@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
@@ -58,9 +58,21 @@ export type ServerlessCodexStatus = {
   rateLimits: unknown;
 };
 
-function codexEntry() {
-  const packageJson = require.resolve("@openai/codex/package.json");
-  return path.join(path.dirname(packageJson), "bin", "codex.js");
+async function codexEntry() {
+  const direct = path.join(process.cwd(), "node_modules", "@openai", "codex", "bin", "codex.js");
+  try {
+    await access(direct);
+    return direct;
+  } catch {
+    // Turbopack can rewrite a static require.resolve() to a numeric module id.
+    // Build the specifier dynamically so Node resolves the external package at runtime.
+    const packageSpecifier = ["@openai", "codex", "package.json"].join("/");
+    const packageJson = require.resolve(packageSpecifier);
+    if (typeof packageJson !== "string") throw new Error("CODEX_CLI_RESOLUTION_FAILED");
+    const fallback = path.join(path.dirname(packageJson), "bin", "codex.js");
+    await access(fallback);
+    return fallback;
+  }
 }
 
 class AppServerClient {
@@ -72,7 +84,8 @@ class AppServerClient {
   constructor(private readonly child: ReturnType<typeof spawn>) {}
 
   static async start(codexHome: string) {
-    const child = spawn(process.execPath, [codexEntry(), "app-server", "--listen", "stdio://"], {
+    const entry = await codexEntry();
+    const child = spawn(process.execPath, [entry, "app-server", "--listen", "stdio://"], {
       env: { ...process.env, CODEX_HOME: codexHome, NO_COLOR: "1" },
       stdio: ["pipe", "pipe", "pipe"]
     });
