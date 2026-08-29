@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { paginateMeasuredManuscript } from "@/lib/pagination/manuscript";
 import styles from "./paged-manuscript-editor.module.css";
 
 type Props = {
@@ -10,67 +11,11 @@ type Props = {
   disabled?: boolean;
 };
 
-const MIN_BREAK_SEARCH = 0.72;
+const PAGE_WIDTH = 794;
+const PAGE_HEIGHT = 1123;
 
-function roughPages(value: string, size = 1200) {
-  if (!value) return [""];
-  const pages: string[] = [];
-  for (let start = 0; start < value.length; start += size) pages.push(value.slice(start, start + size));
-  return pages.length ? pages : [""];
-}
-
-function preferredBreak(text: string, start: number, hardEnd: number) {
-  const minimum = start + Math.floor((hardEnd - start) * MIN_BREAK_SEARCH);
-  const window = text.slice(minimum, hardEnd);
-  const doubleNewline = window.lastIndexOf("\n\n");
-  if (doubleNewline >= 0) return minimum + doubleNewline + 2;
-  const newline = window.lastIndexOf("\n");
-  if (newline >= 0) return minimum + newline + 1;
-  const space = window.lastIndexOf(" ");
-  if (space >= 0) return minimum + space + 1;
-  return hardEnd;
-}
-
-function measuredPages(value: string, measure: HTMLTextAreaElement, width: number, maxHeight: number) {
-  if (!value) return [""];
-  if (width < 40 || maxHeight < 80) return roughPages(value);
-
-  measure.style.width = `${width}px`;
-  const fits = (fragment: string) => {
-    measure.value = fragment || " ";
-    return measure.scrollHeight <= maxHeight + 1;
-  };
-
-  const pages: string[] = [];
-  let start = 0;
-  while (start < value.length) {
-    const remaining = value.slice(start);
-    if (fits(remaining)) {
-      pages.push(remaining);
-      break;
-    }
-
-    let low = start + 1;
-    let high = value.length;
-    let best = low;
-    while (low <= high) {
-      const mid = Math.floor((low + high) / 2);
-      if (fits(value.slice(start, mid))) {
-        best = mid;
-        low = mid + 1;
-      } else {
-        high = mid - 1;
-      }
-    }
-
-    let end = preferredBreak(value, start, best);
-    if (end <= start) end = best;
-    if (end <= start) end = Math.min(value.length, start + 1);
-    pages.push(value.slice(start, end));
-    start = end;
-  }
-
-  return pages.length ? pages : [""];
+function roughPages(value: string) {
+  return paginateMeasuredManuscript(value, (fragment) => fragment.length <= 1200);
 }
 
 function samePages(a: string[], b: string[]) {
@@ -79,9 +24,11 @@ function samePages(a: string[], b: string[]) {
 
 export function PagedManuscriptEditor({ value, onChange, placeholder, disabled }: Props) {
   const [pages, setPages] = useState<string[]>(() => roughPages(value));
+  const [scale, setScale] = useState(1);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
   const firstEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const measureRef = useRef<HTMLTextAreaElement | null>(null);
-  const lastMetrics = useRef({ width: 0, height: 0 });
+  const repaginationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const repaginate = useCallback(() => {
     const editor = firstEditorRef.current;
@@ -90,21 +37,45 @@ export function PagedManuscriptEditor({ value, onChange, placeholder, disabled }
     const width = editor.clientWidth;
     const height = editor.clientHeight;
     if (width <= 0 || height <= 0) return;
-    lastMetrics.current = { width, height };
-    const next = measuredPages(value, measure, width, height);
+
+    measure.style.width = `${width}px`;
+    measure.style.height = `${height}px`;
+    const fits = (fragment: string) => {
+      measure.value = fragment || " ";
+      return measure.scrollHeight <= height + 1;
+    };
+    const next = paginateMeasuredManuscript(value, fits);
     setPages((current) => samePages(current, next) ? current : next);
   }, [value]);
 
   useLayoutEffect(() => {
-    const frame = requestAnimationFrame(repaginate);
-    const editor = firstEditorRef.current;
-    if (!editor || typeof ResizeObserver === "undefined") return () => cancelAnimationFrame(frame);
-    const observer = new ResizeObserver(() => requestAnimationFrame(repaginate));
-    observer.observe(editor);
+    if (repaginationTimer.current) clearTimeout(repaginationTimer.current);
+    repaginationTimer.current = setTimeout(() => requestAnimationFrame(repaginate), 45);
     return () => {
-      cancelAnimationFrame(frame);
-      observer.disconnect();
+      if (repaginationTimer.current) clearTimeout(repaginationTimer.current);
     };
+  }, [repaginate]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const updateScale = () => {
+      const available = Math.max(280, viewport.clientWidth);
+      setScale(Math.min(1, available / PAGE_WIDTH));
+    };
+    updateScale();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(updateScale);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void document.fonts?.ready.then(() => {
+      if (!cancelled) requestAnimationFrame(repaginate);
+    });
+    return () => { cancelled = true; };
   }, [repaginate]);
 
   function changePage(index: number, nextPage: string) {
@@ -115,29 +86,40 @@ export function PagedManuscriptEditor({ value, onChange, placeholder, disabled }
   }
 
   return (
-    <div className={styles.stack} aria-label="페이지 단위 원고 편집기">
-      {pages.map((page, index) => (
-        <article className={styles.page} key={`${index}-${pages.length}`}>
-          <div className={styles.pageHeader} aria-hidden="true">
-            <span>AI BOOK STUDIO</span>
-            <span>{String(index + 1).padStart(2, "0")}</span>
+    <div className={styles.viewport} ref={viewportRef} aria-label="페이지 단위 원고 편집기">
+      <div className={styles.stack} style={{ width: PAGE_WIDTH * scale }}>
+        {pages.map((page, index) => (
+          <div
+            className={styles.pageSlot}
+            key={`${index}-${pages.length}`}
+            style={{ width: PAGE_WIDTH * scale, height: PAGE_HEIGHT * scale }}
+          >
+            <article
+              className={styles.page}
+              style={{ width: PAGE_WIDTH, height: PAGE_HEIGHT, transform: `scale(${scale})` }}
+            >
+              <div className={styles.pageHeader} aria-hidden="true">
+                <span>AI BOOK STUDIO</span>
+                <span>{String(index + 1).padStart(2, "0")}</span>
+              </div>
+              <textarea
+                ref={index === 0 ? firstEditorRef : undefined}
+                className={styles.editor}
+                aria-label={`section manuscript page ${index + 1}`}
+                value={page}
+                onChange={(event) => changePage(index, event.target.value)}
+                placeholder={index === 0 ? placeholder : undefined}
+                disabled={disabled}
+                spellCheck
+              />
+              <footer className={styles.pageFooter} aria-hidden="true">
+                <span>{index + 1}</span>
+                <span>{pages.length} pages</span>
+              </footer>
+            </article>
           </div>
-          <textarea
-            ref={index === 0 ? firstEditorRef : undefined}
-            className={styles.editor}
-            aria-label={`section manuscript page ${index + 1}`}
-            value={page}
-            onChange={(event) => changePage(index, event.target.value)}
-            placeholder={index === 0 ? placeholder : undefined}
-            disabled={disabled}
-            spellCheck
-          />
-          <footer className={styles.pageFooter} aria-hidden="true">
-            <span>{index + 1}</span>
-            <span>{pages.length} pages</span>
-          </footer>
-        </article>
-      ))}
+        ))}
+      </div>
       <textarea ref={measureRef} className={styles.measure} aria-hidden="true" tabIndex={-1} readOnly />
     </div>
   );
