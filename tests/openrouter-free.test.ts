@@ -4,7 +4,8 @@ import {
   OPENROUTER_FREE_ATTEMPTS,
   OpenRouterFreeProvider,
   normalizeOpenRouterContent,
-  parseOpenRouterJson
+  parseOpenRouterJson,
+  selectFreeModelAttempts
 } from "../lib/ai/openrouter-free";
 
 test("normalizes string and text-part OpenRouter content", () => {
@@ -22,38 +23,78 @@ test("rejects content without parseable JSON", () => {
   assert.throws(() => parseOpenRouterJson("not json"), /FREE_AI_INVALID_JSON/);
 });
 
-test("uses only the dynamic free router and progressively relaxes formatting", () => {
+test("keeps router attempts as a final degraded-output fallback", () => {
   assert.deepEqual(OPENROUTER_FREE_ATTEMPTS.map((attempt) => attempt.model), [
-    "openrouter/free",
     "openrouter/free",
     "openrouter/free",
     "openrouter/free"
   ]);
-  assert.deepEqual(OPENROUTER_FREE_ATTEMPTS.map((attempt) => attempt.mode), ["schema", "schema", "json", "plain"]);
+  assert.deepEqual(OPENROUTER_FREE_ATTEMPTS.map((attempt) => attempt.mode), ["schema", "json", "plain"]);
 });
 
-test("falls back to plain JSON-only output when structured free routing fails", async () => {
+test("selects currently free text models and prefers structured output support", () => {
+  const attempts = selectFreeModelAttempts([
+    {
+      id: "provider/structured-free:free",
+      pricing: { prompt: "0", completion: "0", request: "0" },
+      supported_parameters: ["structured_outputs", "response_format"],
+      architecture: { output_modalities: ["text"] },
+      top_provider: { max_completion_tokens: 16000 }
+    },
+    {
+      id: "provider/plain-free:free",
+      pricing: { prompt: "0", completion: "0", request: "0" },
+      supported_parameters: ["max_tokens"],
+      architecture: { output_modalities: ["text"] },
+      top_provider: { max_completion_tokens: 16000 }
+    },
+    {
+      id: "provider/paid",
+      pricing: { prompt: "0.000001", completion: "0", request: "0" },
+      supported_parameters: ["structured_outputs"],
+      architecture: { output_modalities: ["text"] }
+    },
+    {
+      id: "provider/image-free:free",
+      pricing: { prompt: "0", completion: "0", request: "0" },
+      supported_parameters: ["structured_outputs"],
+      architecture: { output_modalities: ["image"] }
+    }
+  ], "BookBlueprint");
+
+  assert.equal(attempts[0]?.model, "provider/structured-free:free");
+  assert.equal(attempts[0]?.mode, "schema");
+  assert.ok(attempts.some((attempt) => attempt.model === "provider/plain-free:free" && attempt.mode === "plain"));
+  assert.ok(!attempts.some((attempt) => attempt.model === "provider/paid"));
+  assert.ok(!attempts.some((attempt) => attempt.model === "provider/image-free:free"));
+});
+
+test("discovers a live free model before falling back to the generic router", async () => {
   const originalFetch = globalThis.fetch;
-  const bodies: Array<Record<string, unknown>> = [];
-  let call = 0;
+  const generationBodies: Array<Record<string, unknown>> = [];
+  let discoveryCalls = 0;
 
-  globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit) => {
-    call += 1;
-    bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
-
-    if (call < 4) {
+  globalThis.fetch = async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes("/api/v1/models")) {
+      discoveryCalls += 1;
       return new Response(JSON.stringify({
-        choices: [{
-          finish_reason: "error",
-          message: { content: "" },
-          error: { message: "No compatible free endpoint was available" }
-        }]
+        data: [
+          {
+            id: "provider/current-free:free",
+            pricing: { prompt: "0", completion: "0", request: "0" },
+            supported_parameters: ["structured_outputs", "response_format", "max_tokens"],
+            architecture: { output_modalities: ["text"] },
+            top_provider: { max_completion_tokens: 16000 }
+          }
+        ]
       }), { status: 200, headers: { "content-type": "application/json" } });
     }
 
+    generationBodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
     return new Response(JSON.stringify({
       id: "gen-test",
-      model: "some-current-free-model",
+      model: "provider/current-free:free",
       choices: [{ finish_reason: "stop", message: { content: "{\"ok\":true}" } }],
       usage: { prompt_tokens: 10, completion_tokens: 4 }
     }), { status: 200, headers: { "content-type": "application/json" } });
@@ -79,10 +120,9 @@ test("falls back to plain JSON-only output when structured free routing fails", 
     });
 
     assert.deepEqual(response.value, { ok: true });
-    assert.equal(call, 4);
-    assert.equal((bodies[0].response_format as { type?: string }).type, "json_schema");
-    assert.equal((bodies[2].response_format as { type?: string }).type, "json_object");
-    assert.equal(bodies[3].response_format, undefined);
+    assert.equal(discoveryCalls, 1);
+    assert.equal(generationBodies[0]?.model, "provider/current-free:free");
+    assert.equal((generationBodies[0]?.response_format as { type?: string }).type, "json_schema");
   } finally {
     globalThis.fetch = originalFetch;
   }
