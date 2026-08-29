@@ -34,10 +34,17 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     const generatedWords = sections.reduce((sum, section) => sum + Number(section.word_count || 0), 0);
     const targetWords = sections.reduce((sum, section) => sum + Number(section.target_words || 0), 0);
     const current = sections.find((section) => section.id === book.current_section_id) ?? null;
+    const latestJob = jobs?.[0] ?? null;
     const calculatedProgress = totalSections > 0 ? (completedSections / totalSections) * 100 : Number(book.progress ?? 0);
+    const planningProgress = book.status === "PLANNING" && latestJob ? Number(latestJob.progress ?? 0) : 0;
+    const effectiveProgress = book.status === "COMPLETED"
+      ? 100
+      : book.status === "PLANNING"
+        ? Math.max(Number(book.progress ?? 0), planningProgress)
+        : Math.max(Number(book.progress ?? 0), calculatedProgress);
 
     return NextResponse.json({
-      book: { ...book, progress: book.status === "COMPLETED" ? 100 : Math.max(Number(book.progress ?? 0), calculatedProgress) },
+      book: { ...book, progress: effectiveProgress },
       progressDetails: {
         completedSections,
         totalSections,
@@ -46,7 +53,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
         currentSectionTitle: current?.title ?? null,
         currentChapterTitle: current ? one(current.chapter)?.title ?? null : null
       },
-      job: jobs?.[0] ?? null,
+      job: latestJob,
       logs: logs ?? []
     });
   } catch (error) {
