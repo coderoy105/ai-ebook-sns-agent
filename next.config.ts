@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 import { withWorkflow } from "workflow/next";
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["@react-pdf/renderer", "@openai/codex", "@vercel/sandbox"],
+  serverExternalPackages: ["@react-pdf/renderer", "@openai/codex"],
   async rewrites() {
     return [
       { source: "/books/:id", destination: "/book?bookId=:id" },
