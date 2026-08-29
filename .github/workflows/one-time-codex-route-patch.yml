@@ -1,0 +1,46 @@
+name: One-time Codex route patch
+
+on:
+  push:
+    branches: [codex-serverless-fallback-20260829]
+    paths:
+      - .github/workflows/one-time-codex-route-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: codex-serverless-fallback-20260829
+      - name: Add internal Codex route
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('app/api/core/[...path]/route.ts')
+          text = p.read_text()
+          anchor = '} from "@/lib/api/ai-connection-handlers";\n'
+          addition = anchor + 'import { handleCodexInternalGenerate } from "@/lib/api/codex-internal-handler";\n'
+          if 'handleCodexInternalGenerate' not in text:
+              if anchor not in text:
+                  raise SystemExit('missing import anchor')
+              text = text.replace(anchor, addition, 1)
+          post_anchor = '  if (path[0] === "editor") return handleEditorPOST(request, path.slice(1));\n'
+          post_addition = post_anchor + '  if (path[0] === "internal" && path[1] === "codex" && path[2] === "generate") return handleCodexInternalGenerate(request);\n'
+          if 'path[0] === "internal" && path[1] === "codex"' not in text:
+              if post_anchor not in text:
+                  raise SystemExit('missing POST anchor')
+              text = text.replace(post_anchor, post_addition, 1)
+          p.write_text(text)
+          PY
+      - name: Commit route patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add 'app/api/core/[...path]/route.ts'
+          git diff --cached --check
+          git commit -m "feat: route internal Codex generation bridge"
+          git push origin HEAD:codex-serverless-fallback-20260829
