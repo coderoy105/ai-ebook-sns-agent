@@ -23,13 +23,32 @@ export type CodexConnectionStatus = {
   error?: string;
 };
 
+type CodexWirePayload = {
+  type?: string;
+  loginId?: string;
+  verificationUrl?: string;
+  userCode?: string;
+  connected?: boolean;
+  backgroundReady?: boolean;
+  workerConfigured?: boolean;
+  serverlessFallback?: boolean;
+  authMode?: string | null;
+  model?: string;
+  modelAvailable?: boolean | null;
+  models?: string[];
+  planType?: string | null;
+  email?: string | null;
+  rateLimits?: unknown;
+  error?: string;
+};
+
 const CODEX_CONNECTION_URL = "/api/auth/openrouter/connection?provider=codex";
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function asConnected(payload: any): CodexConnectedEvent {
+function asConnected(payload: CodexWirePayload): CodexConnectedEvent {
   return {
     type: "connected",
     authMode: payload.authMode ?? "chatgpt",
@@ -41,7 +60,10 @@ function asConnected(payload: any): CodexConnectedEvent {
   };
 }
 
-function handleDeviceCode(payload: any, options?: { onEvent?: (event: CodexDeviceEvent) => void; openVerificationPage?: boolean }) {
+function handleDeviceCode(payload: CodexWirePayload, options?: {
+  onEvent?: (event: CodexDeviceEvent) => void;
+  openVerificationPage?: boolean;
+}) {
   if (!payload.loginId || !payload.verificationUrl || !payload.userCode) throw new Error("CODEX_DEVICE_CODE_START_FAILED");
   const event: CodexDeviceEvent = {
     type: "device_code",
@@ -55,14 +77,27 @@ function handleDeviceCode(payload: any, options?: { onEvent?: (event: CodexDevic
 
 export async function getCodexConnectionStatus(): Promise<CodexConnectionStatus> {
   const response = await fetch(CODEX_CONNECTION_URL, { cache: "no-store" });
-  const payload = await response.json();
+  const payload = await response.json() as CodexWirePayload;
   if (!response.ok) throw new Error(payload.error ?? "CODEX_CONNECTION_STATUS_FAILED");
-  return payload as CodexConnectionStatus;
+  return {
+    connected: payload.connected === true,
+    backgroundReady: payload.backgroundReady,
+    workerConfigured: payload.workerConfigured,
+    serverlessFallback: payload.serverlessFallback,
+    authMode: payload.authMode,
+    model: payload.model,
+    modelAvailable: payload.modelAvailable,
+    models: payload.models,
+    planType: payload.planType,
+    email: payload.email,
+    rateLimits: payload.rateLimits,
+    error: payload.error
+  };
 }
 
 export async function disconnectCodexChatGPT() {
   const response = await fetch(CODEX_CONNECTION_URL, { method: "DELETE" });
-  const payload = await response.json();
+  const payload = await response.json() as CodexWirePayload;
   if (!response.ok) throw new Error(payload.error ?? "CODEX_DISCONNECT_FAILED");
 }
 
@@ -78,7 +113,7 @@ async function connectFromStream(response: Response, options?: {
 
   const consume = (line: string): CodexConnectedEvent | null => {
     if (!line.trim()) return null;
-    const payload = JSON.parse(line);
+    const payload = JSON.parse(line) as CodexWirePayload;
     if (payload.type === "error") throw new Error(payload.error ?? "CODEX_LOGIN_FAILED");
     if (payload.type === "device_code") {
       handleDeviceCode(payload, {
@@ -125,14 +160,14 @@ export async function connectCodexChatGPT(options?: {
   options?.onEvent?.({ type: "starting", message: "Codex ChatGPT 로그인을 준비하고 있습니다." });
   const response = await fetch(CODEX_CONNECTION_URL, { method: "POST", cache: "no-store" });
   if (!response.ok) {
-    const payload = await response.json().catch(() => ({}));
+    const payload = await response.json().catch(() => ({})) as CodexWirePayload;
     throw new Error(payload.error ?? "CODEX_LOGIN_START_FAILED");
   }
 
   const contentType = response.headers.get("content-type") ?? "";
   if (contentType.includes("application/x-ndjson")) return connectFromStream(response, options);
 
-  const payload = await response.json();
+  const payload = await response.json() as CodexWirePayload;
   if (payload.type === "connected") {
     const connected = asConnected(payload);
     options?.onEvent?.(connected);
