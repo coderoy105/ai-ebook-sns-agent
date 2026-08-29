@@ -23,4 +23,5 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run worker:check
+      - run: docker build -t ai-book-studio-codex-worker:ci services/codex-worker
       - run: npm run build
