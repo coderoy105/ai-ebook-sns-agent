@@ -16,6 +16,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="shell">
       <a className="skip-link" href="#main-content">본문으로 건너뛰기</a>
+
+      <header className="mobile-appbar">
+        <ProductMark compact />
+        <Link className="mobile-appbar-action" href="/books/new">새 책 <span aria-hidden="true">＋</span></Link>
+      </header>
+
       <aside className="sidebar">
         <div className="sidebar-top">
           <ProductMark />
