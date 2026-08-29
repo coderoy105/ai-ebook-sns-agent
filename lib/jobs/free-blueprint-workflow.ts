@@ -1,6 +1,12 @@
 import { FatalError, sleep } from "workflow";
 import { createServiceSupabase } from "@/lib/supabase/server";
-import { OpenRouterFreeProvider } from "@/lib/ai/openrouter-free";
+import {
+  backgroundProviderCheckpointPrefix,
+  backgroundProviderLabel,
+  generateBackgroundStructured,
+  normalizeBackgroundProvider,
+  type BackgroundAiProvider
+} from "@/lib/ai/background-provider";
 import {
   BookBlueprintSchema,
   BookBlueprintSkeletonSchema,
@@ -24,29 +30,29 @@ type BlueprintForm = {
   targetWords: number;
   templateMood: string;
   mode: "quick" | "advanced";
+  aiProvider?: BackgroundAiProvider;
 };
 
 type WorkflowInput = { bookId: string; userId: string; jobId: string; form: BlueprintForm };
 type Usage = { inputTokens: number; outputTokens: number; durationMs: number; model: string; requestId?: string };
 type SkeletonResult =
   | { kind: "completed"; skeleton: BookBlueprintSkeleton; usage: Usage; checkpoint: boolean }
-  | { kind: "daily-limit" }
+  | { kind: "usage-limit" }
   | { kind: "connection-expired" }
   | { kind: "temporary-error"; message: string };
 type ChapterResult =
   | { kind: "completed"; plan: ChapterSections; usage: Usage; checkpoint: boolean }
-  | { kind: "daily-limit" }
+  | { kind: "usage-limit" }
   | { kind: "connection-expired" }
   | { kind: "temporary-error"; message: string };
-
-const SKELETON_STEP = "FREE_BLUEPRINT_SKELETON_V2";
-const CHAPTER_STEP_PREFIX = "FREE_BLUEPRINT_CHAPTER_V2";
 
 export async function generateFreeBlueprintWorkflow(input: WorkflowInput) {
   "use workflow";
 
+  const provider = normalizeBackgroundProvider(input.form.aiProvider);
+  const providerLabel = backgroundProviderLabel(provider);
   try {
-    await markPlanning(input, "PLANNING", 8, "Book Blueprint를 작은 단계로 나눠 백그라운드 생성을 시작했습니다.");
+    await markPlanning(input, "PLANNING", 8, `${providerLabel}로 Book Blueprint를 작은 단계로 나눠 백그라운드 생성을 시작했습니다.`);
 
     let skeletonResult: Extract<SkeletonResult, { kind: "completed" }> | null = null;
     let skeletonRetries = 0;
@@ -58,18 +64,18 @@ export async function generateFreeBlueprintWorkflow(input: WorkflowInput) {
           input,
           "PLANNING",
           30,
-          result.checkpoint ? "저장된 책 구조를 불러왔습니다." : "1단계 책 구조와 Chapter 설계가 완료되었습니다."
+          result.checkpoint ? "저장된 책 구조를 불러왔습니다." : `1단계 책 구조와 Chapter 설계가 완료되었습니다. · ${providerLabel}`
         );
         break;
       }
-      if (result.kind === "daily-limit") {
-        await markPlanning(input, "WAITING_LIMIT", 12, "무료 일일 한도에 도달했습니다. 저장된 단계에서 24시간 뒤 자동 재개합니다.");
-        await sleep("24h");
-        await markPlanning(input, "PLANNING", 14, "무료 한도 대기 후 Book Blueprint 생성을 자동 재개합니다.");
+      if (result.kind === "usage-limit") {
+        await markPlanning(input, "WAITING_LIMIT", 12, limitMessage(provider, "Book Blueprint 책 구조 설계"));
+        await sleep(limitWait(provider));
+        await markPlanning(input, "PLANNING", 14, `${providerLabel} 사용 한도 대기 후 저장된 단계에서 자동 재개합니다.`);
         continue;
       }
       if (result.kind === "connection-expired") {
-        await markPlanning(input, "NEEDS_RECONNECT", 12, "무료 AI 연결이 만료되었습니다. 다시 연결하면 저장된 단계에서 이어집니다.");
+        await markPlanning(input, "NEEDS_RECONNECT", 12, `${providerLabel} 연결이 만료되었습니다. 다시 연결하면 저장된 단계에서 이어집니다.`);
         return { status: "needs-reconnect", bookId: input.bookId };
       }
       if (skeletonRetries < 1) {
@@ -113,20 +119,20 @@ export async function generateFreeBlueprintWorkflow(input: WorkflowInput) {
             if (!result.checkpoint) usage.push(result.usage);
             break;
           }
-          if (result.kind === "daily-limit") {
+          if (result.kind === "usage-limit") {
             const progress = planningProgress(completedChapters, totalChapters);
-            await markPlanning(input, "WAITING_LIMIT", progress, `Chapter ${completedChapters + 1}/${totalChapters} 설계 중 무료 한도에 도달했습니다. 저장된 단계에서 24시간 뒤 이어집니다.`);
-            await sleep("24h");
-            await markPlanning(input, "PLANNING", progress, "무료 한도 대기 후 다음 Chapter 설계를 재개합니다.");
+            await markPlanning(input, "WAITING_LIMIT", progress, limitMessage(provider, `Chapter ${completedChapters + 1}/${totalChapters} 설계`));
+            await sleep(limitWait(provider));
+            await markPlanning(input, "PLANNING", progress, `${providerLabel} 사용 한도 대기 후 다음 Chapter 설계를 재개합니다.`);
             continue;
           }
           if (result.kind === "connection-expired") {
-            await markPlanning(input, "NEEDS_RECONNECT", planningProgress(completedChapters, totalChapters), "무료 AI 연결이 만료되었습니다. 다시 연결하면 완료된 Chapter 다음부터 이어집니다.");
+            await markPlanning(input, "NEEDS_RECONNECT", planningProgress(completedChapters, totalChapters), `${providerLabel} 연결이 만료되었습니다. 다시 연결하면 완료된 Chapter 다음부터 이어집니다.`);
             return { status: "needs-reconnect", bookId: input.bookId };
           }
           if (chapterRetries < 1) {
             chapterRetries += 1;
-            await markPlanning(input, "RETRYING", planningProgress(completedChapters, totalChapters), `Chapter ${completedChapters + 1}/${totalChapters} JSON이 불완전해 2분 뒤 해당 Chapter만 다시 시도합니다.`);
+            await markPlanning(input, "RETRYING", planningProgress(completedChapters, totalChapters), `Chapter ${completedChapters + 1}/${totalChapters} 응답이 불완전해 2분 뒤 해당 Chapter만 다시 시도합니다.`);
             await sleep("2m");
             continue;
           }
@@ -140,7 +146,7 @@ export async function generateFreeBlueprintWorkflow(input: WorkflowInput) {
           input,
           "PLANNING",
           planningProgress(completedChapters, totalChapters),
-          `${completedChapters}/${totalChapters} Chapter 세부 목차 완료${chapterResult.checkpoint ? " · 저장본 복원" : ""}`
+          `${completedChapters}/${totalChapters} Chapter 세부 목차 완료${chapterResult.checkpoint ? " · 저장본 복원" : ` · ${providerLabel}`}`
         );
       }
       parts.push({ ...part, chapters });
@@ -148,7 +154,7 @@ export async function generateFreeBlueprintWorkflow(input: WorkflowInput) {
 
     const blueprint = BookBlueprintSchema.parse({ ...skeleton, parts });
     await persistBlueprintStep(input, blueprint, usage);
-    await finishPlanning(input);
+    await finishPlanning(input, providerLabel);
     return { status: "completed", bookId: input.bookId };
   } catch (error) {
     await failPlanning(input, error instanceof Error ? error.message : String(error));
@@ -156,22 +162,42 @@ export async function generateFreeBlueprintWorkflow(input: WorkflowInput) {
   }
 }
 
+function providerOf(input: WorkflowInput) {
+  return normalizeBackgroundProvider(input.form.aiProvider);
+}
+
 function planningProgress(completed: number, total: number) {
   if (total <= 0) return 85;
   return Math.min(88, 30 + (completed / total) * 58);
 }
 
-async function loadOpenRouterKey(userId: string) {
-  const supabase = createServiceSupabase();
-  const { data, error } = await supabase.rpc<string | null>("get_openrouter_credential", { p_user_id: userId });
-  if (error) throw new Error(error.message);
-  return typeof data === "string" ? data : null;
+function limitWait(provider: BackgroundAiProvider) {
+  return provider === "codex" ? "1h" : "24h";
+}
+
+function limitMessage(provider: BackgroundAiProvider, stage: string) {
+  return provider === "codex"
+    ? `${stage} 중 ChatGPT/Codex 사용 한도에 도달했습니다. 완료된 단계는 저장되어 있으며 1시간 뒤 자동 확인합니다.`
+    : `${stage} 중 OpenRouter 무료 일일 한도에 도달했습니다. 완료된 단계는 저장되어 있으며 24시간 뒤 자동 재개합니다.`;
 }
 
 function classifyFailure(message: string): Exclude<SkeletonResult, { kind: "completed" }> {
-  if (message === "FREE_AI_DAILY_LIMIT") return { kind: "daily-limit" };
-  if (message === "FREE_AI_CONNECTION_EXPIRED" || message === "FREE_AI_CONNECTION_REQUIRED") return { kind: "connection-expired" };
+  if (message === "FREE_AI_DAILY_LIMIT" || message === "CODEX_USAGE_LIMIT") return { kind: "usage-limit" };
+  if (
+    message === "FREE_AI_CONNECTION_EXPIRED" ||
+    message === "FREE_AI_CONNECTION_REQUIRED" ||
+    message === "CODEX_CONNECTION_EXPIRED" ||
+    message === "CODEX_CONNECTION_REQUIRED"
+  ) return { kind: "connection-expired" };
   return { kind: "temporary-error", message };
+}
+
+function skeletonStepType(provider: BackgroundAiProvider) {
+  return `${backgroundProviderCheckpointPrefix(provider)}_BLUEPRINT_SKELETON_V3`;
+}
+
+function chapterStepType(provider: BackgroundAiProvider, partIndex: number, chapterIndex: number) {
+  return `${backgroundProviderCheckpointPrefix(provider)}_BLUEPRINT_CHAPTER_V3:${partIndex}:${chapterIndex}`;
 }
 
 async function loadCheckpoint<T>(bookId: string, stepType: string, parse: (value: unknown) => T): Promise<T | null> {
@@ -207,28 +233,25 @@ async function saveCheckpoint(input: WorkflowInput, stepType: string, output: un
 
 async function generateBlueprintSkeletonStep(input: WorkflowInput): Promise<SkeletonResult> {
   "use step";
-  const checkpoint = await loadCheckpoint(input.bookId, SKELETON_STEP, (value) => BookBlueprintSkeletonSchema.parse(value));
+  const provider = providerOf(input);
+  const stepType = skeletonStepType(provider);
+  const checkpoint = await loadCheckpoint(input.bookId, stepType, (value) => BookBlueprintSkeletonSchema.parse(value));
   if (checkpoint) {
     return { kind: "completed", skeleton: checkpoint, usage: { inputTokens: 0, outputTokens: 0, durationMs: 0, model: "checkpoint" }, checkpoint: true };
   }
 
-  const key = await loadOpenRouterKey(input.userId);
-  if (!key) return { kind: "connection-expired" };
-
   try {
-    const provider = new OpenRouterFreeProvider(key);
-    const generation = await provider.generateStructured({
-      model: "openrouter/free",
+    const generation = await generateBackgroundStructured(provider, input.userId, {
       schemaName: "blueprint_skeleton",
       jsonSchema: bookBlueprintSkeletonJsonSchema as unknown as Record<string, unknown>,
       system: plannerSystem(),
       prompt: plannerSkeletonPrompt(input.form),
       parse: (value) => BookBlueprintSkeletonSchema.parse(value)
     });
-    await saveCheckpoint(input, SKELETON_STEP, generation.value, generation.usage);
+    await saveCheckpoint(input, stepType, generation.value, generation.usage);
     return { kind: "completed", skeleton: generation.value, usage: generation.usage, checkpoint: false };
   } catch (error) {
-    return classifyFailure(error instanceof Error ? error.message : "FREE_AI_FAILED");
+    return classifyFailure(error instanceof Error ? error.message : "AI_BLUEPRINT_FAILED");
   }
 }
 
@@ -241,20 +264,16 @@ async function generateChapterSectionsStep(input: WorkflowInput & {
   chapter: BookBlueprintSkeleton["parts"][number]["chapters"][number];
 }): Promise<ChapterResult> {
   "use step";
-  const stepType = `${CHAPTER_STEP_PREFIX}:${input.partIndex}:${input.chapterIndex}`;
+  const provider = providerOf(input);
+  const stepType = chapterStepType(provider, input.partIndex, input.chapterIndex);
   const checkpoint = await loadCheckpoint(input.bookId, stepType, (value) => ChapterSectionsSchema.parse(value));
   if (checkpoint) {
     return { kind: "completed", plan: checkpoint, usage: { inputTokens: 0, outputTokens: 0, durationMs: 0, model: "checkpoint" }, checkpoint: true };
   }
 
-  const key = await loadOpenRouterKey(input.userId);
-  if (!key) return { kind: "connection-expired" };
-
   try {
     const rule = getBookTypeRule(input.form.bookType);
-    const provider = new OpenRouterFreeProvider(key);
-    const generation = await provider.generateStructured({
-      model: "openrouter/free",
+    const generation = await generateBackgroundStructured(provider, input.userId, {
       schemaName: "chapter_sections",
       jsonSchema: chapterSectionsJsonSchema as unknown as Record<string, unknown>,
       system: plannerSystem(),
@@ -275,14 +294,14 @@ async function generateChapterSectionsStep(input: WorkflowInput & {
     await saveCheckpoint(input, stepType, generation.value, generation.usage);
     return { kind: "completed", plan: generation.value, usage: generation.usage, checkpoint: false };
   } catch (error) {
-    const classified = classifyFailure(error instanceof Error ? error.message : "FREE_AI_FAILED");
-    return classified.kind === "temporary-error" ? classified : classified;
+    return classifyFailure(error instanceof Error ? error.message : "AI_BLUEPRINT_FAILED");
   }
 }
 
 async function persistBlueprintStep(input: WorkflowInput, blueprint: BookBlueprint, usages: Usage[]) {
   "use step";
   const supabase = createServiceSupabase();
+  const provider = providerOf(input);
 
   await supabase.from("parts").delete().eq("book_id", input.bookId);
   await supabase.from("book_blueprints").delete().eq("book_id", input.bookId);
@@ -367,7 +386,7 @@ async function persistBlueprintStep(input: WorkflowInput, blueprint: BookBluepri
     durationMs: acc.durationMs + item.durationMs,
     models: item.model && item.model !== "checkpoint" ? [...acc.models, item.model] : acc.models
   }), { inputTokens: 0, outputTokens: 0, durationMs: 0, models: [] as string[] });
-  const modelLabel = [...new Set(aggregate.models)].join(", ").slice(0, 240) || "free-ai-checkpoint";
+  const modelLabel = [...new Set(aggregate.models)].join(", ").slice(0, 240) || `${backgroundProviderCheckpointPrefix(provider).toLowerCase()}-checkpoint`;
 
   const updates = await Promise.all([
     supabase.from("books").update({
@@ -381,7 +400,7 @@ async function persistBlueprintStep(input: WorkflowInput, blueprint: BookBluepri
     supabase.from("token_usage").insert({
       user_id: input.userId,
       book_id: input.bookId,
-      operation: "FREE_BOOK_PLANNER_BACKGROUND_SPLIT",
+      operation: provider === "codex" ? "CODEX_LUNA_BOOK_PLANNER_BACKGROUND_SPLIT" : "FREE_BOOK_PLANNER_BACKGROUND_SPLIT",
       model: modelLabel,
       input_tokens: aggregate.inputTokens,
       output_tokens: aggregate.outputTokens,
@@ -403,12 +422,12 @@ async function markPlanning(input: WorkflowInput, status: string, progress: numb
   ]);
 }
 
-async function finishPlanning(input: WorkflowInput) {
+async function finishPlanning(input: WorkflowInput, providerLabel: string) {
   "use step";
   const supabase = createServiceSupabase();
   await Promise.all([
     supabase.from("generation_jobs").update({ status: "COMPLETED", progress: 100, finished_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", input.jobId),
-    supabase.from("job_logs").insert({ generation_job_id: input.jobId, level: "info", message: "Book Blueprint와 전체 목차 생성이 완료되었습니다." })
+    supabase.from("job_logs").insert({ generation_job_id: input.jobId, level: "info", message: `Book Blueprint와 전체 목차 생성이 완료되었습니다. · ${providerLabel}` })
   ]);
 }
 
