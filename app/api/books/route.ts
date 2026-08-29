@@ -6,6 +6,7 @@ import { computeWordBudget, getBookTypeRule } from "@/lib/book-types/engine";
 import { ReaderProfileSchema, WritingStyleSchema } from "@/lib/ai/schemas";
 import { assertRateLimit } from "@/lib/security/rate-limit";
 import { generateFreeBlueprintWorkflow } from "@/lib/jobs/free-blueprint-workflow";
+import { backgroundProviderLabel, hasBackgroundCredential } from "@/lib/ai/background-provider";
 
 const CreateBookSchema = z.object({
   idea: z.string().min(8).max(8000),
@@ -16,7 +17,8 @@ const CreateBookSchema = z.object({
   tone: z.string().min(2).max(500),
   targetPages: z.number().int().min(10).max(800),
   templateMood: z.string().min(2).max(100),
-  mode: z.enum(["quick", "advanced"]).default("quick")
+  mode: z.enum(["quick", "advanced"]).default("quick"),
+  aiProvider: z.enum(["openrouter", "codex"]).default("openrouter")
 });
 
 function inferReaderProfile(input: z.infer<typeof CreateBookSchema>) {
@@ -64,15 +66,32 @@ export async function POST(request: Request) {
     const rule = getBookTypeRule(input.bookType);
     const service = createServiceSupabase();
 
-    const requestKey = request.headers.get("x-openrouter-key")?.trim();
-    if (requestKey && requestKey.length >= 16) {
-      const { error: saveError } = await service.rpc("store_openrouter_credential", { p_user_id: user.id, p_secret: requestKey });
-      if (saveError) throw new Error(saveError.message);
+    if (input.aiProvider === "openrouter") {
+      const requestKey = request.headers.get("x-openrouter-key")?.trim();
+      if (requestKey && requestKey.length >= 16) {
+        const { error: saveError } = await service.rpc("store_openrouter_credential", { p_user_id: user.id, p_secret: requestKey });
+        if (saveError) throw new Error(saveError.message);
+      }
     }
-    const { data: hasCredential, error: credentialError } = await service.rpc<boolean>("has_openrouter_credential", { p_user_id: user.id });
-    if (credentialError) throw new Error(credentialError.message);
-    if (hasCredential !== true) {
-      return NextResponse.json({ error: "FREE_AI_CONNECTION_REQUIRED", reconnect: true }, { status: 428 });
+
+    const hasCredential = await hasBackgroundCredential(user.id, input.aiProvider);
+    if (!hasCredential) {
+      return NextResponse.json({
+        error: input.aiProvider === "codex" ? "CODEX_CONNECTION_REQUIRED" : "FREE_AI_CONNECTION_REQUIRED",
+        reconnect: true,
+        provider: input.aiProvider
+      }, { status: 428 });
+    }
+
+    if (input.aiProvider === "codex") {
+      const { data: profile, error: profileError } = await service.from("codex_connection_profiles")
+        .select("model_available,plan_type")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (profileError) throw new Error(profileError.message);
+      if (profile?.model_available === false) {
+        return NextResponse.json({ error: "CODEX_LUNA_UNAVAILABLE", provider: "codex" }, { status: 409 });
+      }
     }
 
     const { data: book, error: bookError } = await supabase.from("books").insert({
@@ -152,9 +171,10 @@ export async function POST(request: Request) {
       form: planningInput
     }]);
 
+    const providerLabel = backgroundProviderLabel(input.aiProvider);
     await Promise.all([
       supabase.from("generation_jobs").update({ workflow_run_id: run.runId, status: "PLANNING", progress: 8 }).eq("id", job.id),
-      supabase.from("job_logs").insert({ generation_job_id: job.id, level: "info", message: "Book Blueprint가 백그라운드 작업으로 등록되었습니다. 화면을 나가도 계속 진행됩니다." })
+      supabase.from("job_logs").insert({ generation_job_id: job.id, level: "info", message: `${providerLabel} Book Blueprint가 백그라운드 작업으로 등록되었습니다. 화면을 나가도 계속 진행됩니다.` })
     ]);
 
     return NextResponse.json({
@@ -163,7 +183,8 @@ export async function POST(request: Request) {
       runId: run.runId,
       background: true,
       planning: true,
-      aiMode: "free"
+      aiMode: input.aiProvider,
+      model: input.aiProvider === "codex" ? "gpt-5.6-luna" : "openrouter/free"
     }, { status: 202 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
