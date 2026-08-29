@@ -3,6 +3,7 @@ import "./globals.css";
 import "./editor-extras.css";
 import "./product-v2.css";
 import "./product-v2-fixes.css";
+import "./product-v2-progress.css";
 
 export const metadata: Metadata = {
   title: {
