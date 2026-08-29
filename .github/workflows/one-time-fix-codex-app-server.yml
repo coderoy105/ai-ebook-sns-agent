@@ -1,0 +1,63 @@
+name: One-time fix Codex App Server
+
+on:
+  push:
+    paths:
+      - '.github/workflows/one-time-fix-codex-app-server.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Patch Codex App Server protocol and diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('services/codex-worker/server.mjs')
+          s = p.read_text()
+
+          s = s.replace(
+          '''function sha256(value) {\n  return createHash("sha256").update(value).digest("hex");\n}\n''',
+          '''function sanitizeAppServerDetail(value) {\n  return String(value ?? "")\n    .replace(/Bearer\\s+[A-Za-z0-9._~-]+/gi, "Bearer [redacted]")\n    .replace(/\\"(access_token|refresh_token|id_token|token)\\"\\s*:\\s*\\"[^\\"]+\\"/gi, '\"$1\":\"[redacted]\"')\n    .replace(/[A-Za-z0-9_-]{80,}/g, "[redacted]")\n    .replace(/\\s+/g, " ")\n    .trim()\n    .slice(-1200);\n}\n\nfunction sha256(value) {\n  return createHash("sha256").update(value).digest("hex");\n}\n''')
+
+          s = s.replace(
+          '''      env: { ...process.env, CODEX_HOME: codexHome, NO_COLOR: "1" },''',
+          '''      env: {\n        ...process.env,\n        CODEX_HOME: codexHome,\n        NO_COLOR: "1",\n        LOG_FORMAT: "json",\n        RUST_LOG: process.env.CODEX_APP_SERVER_RUST_LOG ?? "warn",\n        CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED: "1"\n      },''')
+
+          s = s.replace(
+          '''    const client = new AppServerClient(child);\n    const lines = readline.createInterface({ input: child.stdout });\n    lines.on("line", (line) => client.handleLine(line));\n    child.once("exit", () => client.failAll(new Error("CODEX_APP_SERVER_EXITED")));\n    child.once("error", () => client.failAll(new Error("CODEX_APP_SERVER_FAILED")));\n    child.stderr.resume();\n    await client.request("initialize", {\n      clientInfo: { name: "ai-book-studio-worker", title: "AI Book Studio Worker", version: "1.0.0" },\n      capabilities: { experimentalApi: true }\n    }, 30000);\n    client.notify("initialized", {});''',
+          '''    const client = new AppServerClient(child);\n    let stderrText = "";\n    child.stderr.setEncoding("utf8");\n    child.stderr.on("data", (chunk) => {\n      stderrText = `${stderrText}${String(chunk)}`.slice(-12000);\n    });\n    const lines = readline.createInterface({ input: child.stdout });\n    lines.on("line", (line) => client.handleLine(line));\n    child.once("exit", (code, signal) => {\n      const detail = sanitizeAppServerDetail(stderrText);\n      const suffix = `${code ?? "null"}:${signal ?? "none"}`;\n      client.failAll(new Error(detail ? `CODEX_APP_SERVER_EXITED:${suffix}:${detail}` : `CODEX_APP_SERVER_EXITED:${suffix}`));\n    });\n    child.once("error", (error) => client.failAll(new Error(`CODEX_APP_SERVER_FAILED:${sanitizeAppServerDetail(error?.message)}`)));\n    await client.request("initialize", {\n      clientInfo: { name: "ai-book-studio-worker", title: "AI Book Studio Worker", version: "1.0.0" },\n      capabilities: { experimentalApi: true, requestAttestation: false }\n    }, 30000);\n    client.notify("initialized");''')
+
+          s = s.replace(
+          '''      this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\\n`);''',
+          '''      this.child.stdin.write(`${JSON.stringify({ id, method, params })}\\n`);''')
+          s = s.replace(
+          '''    if (!this.closed) this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\\n`);''',
+          '''    if (!this.closed) this.child.stdin.write(`${JSON.stringify({ method, params })}\\n`);''')
+
+          required = [
+            'requestAttestation: false',
+            'CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED: "1"',
+            'CODEX_APP_SERVER_EXITED:${suffix}',
+            'JSON.stringify({ id, method, params })',
+            'JSON.stringify({ method, params })'
+          ]
+          missing = [x for x in required if x not in s]
+          if missing:
+              raise SystemExit(f'patch verification failed: {missing}')
+          if 'jsonrpc: "2.0"' in s:
+              raise SystemExit('legacy jsonrpc wire field still present')
+          p.write_text(s)
+          PY
+          node --check services/codex-worker/server.mjs
+          git config user.name "AI Book Studio Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add services/codex-worker/server.mjs
+          git commit -m "fix: stabilize Codex App Server startup"
+          git push origin HEAD:main
