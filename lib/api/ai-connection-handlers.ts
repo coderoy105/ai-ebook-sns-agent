@@ -1,18 +1,18 @@
 import { NextResponse } from "next/server";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
+import { CODEX_LUNA_MODEL } from "@/lib/ai/codex-constants";
 import {
-  CODEX_LUNA_MODEL,
-  callCodexWorker,
-  codexWorkerConfigured,
-  readCodexWorkerStatus,
-  type CodexWorkerStatus
-} from "@/lib/ai/codex-worker";
+  logoutCodexRuntime,
+  readCodexRuntimeStatus,
+  startCodexRuntimeLogin,
+  type CodexRuntimeStatus
+} from "@/lib/ai/codex-runtime-client";
 
 function wantsCodex(request: Request) {
   return new URL(request.url).searchParams.get("provider") === "codex";
 }
 
-async function syncCodexProfile(userId: string, status: CodexWorkerStatus) {
+async function syncCodexProfile(userId: string, status: CodexRuntimeStatus) {
   const service = createServiceSupabase();
   if (!status.connected) {
     await service.from("codex_connection_profiles").delete().eq("user_id", userId);
@@ -30,7 +30,7 @@ async function syncCodexProfile(userId: string, status: CodexWorkerStatus) {
   if (error) throw new Error(error.message);
 }
 
-function codexPayload(status: CodexWorkerStatus) {
+function codexPayload(status: CodexRuntimeStatus) {
   return {
     connected: status.connected,
     backgroundReady: status.connected && status.authMode === "chatgpt" && status.modelAvailable,
@@ -46,24 +46,17 @@ function codexPayload(status: CodexWorkerStatus) {
   };
 }
 
+function errorStatus(message: string) {
+  if (message === "UNAUTHORIZED") return 401;
+  if (message === "CODEX_RUNTIME_UNAVAILABLE" || message === "CODEX_INTERNAL_AUTH_UNAVAILABLE" || message === "CODEX_WORKER_UNAVAILABLE") return 503;
+  return 400;
+}
+
 export async function handleAiConnectionGET(request: Request) {
   try {
     const { user } = await requireUser();
     if (wantsCodex(request)) {
-      if (!codexWorkerConfigured()) {
-        return NextResponse.json({
-          connected: false,
-          backgroundReady: false,
-          workerConfigured: false,
-          provider: "codex_chatgpt",
-          model: CODEX_LUNA_MODEL,
-          modelAvailable: null,
-          planType: null,
-          rateLimits: null,
-          error: "CODEX_WORKER_UNAVAILABLE"
-        });
-      }
-      const status = await readCodexWorkerStatus(user.id);
+      const status = await readCodexRuntimeStatus(user.id);
       await syncCodexProfile(user.id, status);
       return NextResponse.json(codexPayload(status));
     }
@@ -74,7 +67,7 @@ export async function handleAiConnectionGET(request: Request) {
     return NextResponse.json({ connected: data === true, backgroundReady: data === true, provider: "openrouter" });
   } catch (error) {
     const message = error instanceof Error ? error.message : "AI_CONNECTION_STATUS_FAILED";
-    return NextResponse.json({ error: message }, { status: message === "UNAUTHORIZED" ? 401 : 400 });
+    return NextResponse.json({ error: message }, { status: errorStatus(message) });
   }
 }
 
@@ -83,8 +76,7 @@ export async function handleAiConnectionDELETE(request: Request) {
     const { user } = await requireUser();
     const service = createServiceSupabase();
     if (wantsCodex(request)) {
-      if (!codexWorkerConfigured()) throw new Error("CODEX_WORKER_UNAVAILABLE");
-      await callCodexWorker("/auth/logout", { method: "POST", body: { userId: user.id } });
+      await logoutCodexRuntime(user.id);
       const { error } = await service.from("codex_connection_profiles").delete().eq("user_id", user.id);
       if (error) throw new Error(error.message);
       return NextResponse.json({ connected: false });
@@ -95,7 +87,7 @@ export async function handleAiConnectionDELETE(request: Request) {
     return NextResponse.json({ connected: false });
   } catch (error) {
     const message = error instanceof Error ? error.message : "AI_DISCONNECT_FAILED";
-    return NextResponse.json({ error: message }, { status: message === "UNAUTHORIZED" ? 401 : message === "CODEX_WORKER_UNAVAILABLE" ? 503 : 400 });
+    return NextResponse.json({ error: message }, { status: errorStatus(message) });
   }
 }
 
@@ -104,23 +96,10 @@ export async function handleAiConnectionPOST(request: Request) {
 
   try {
     const { user } = await requireUser();
-    if (!codexWorkerConfigured()) throw new Error("CODEX_WORKER_UNAVAILABLE");
-    const result = await callCodexWorker<{
-      type: "chatgptDeviceCode" | "already_connected";
-      loginId?: string;
-      verificationUrl?: string;
-      userCode?: string;
-      connected?: boolean;
-      authMode?: string | null;
-      email?: string | null;
-      planType?: string | null;
-      modelAvailable?: boolean;
-      models?: string[];
-      rateLimits?: unknown;
-    }>("/auth/start", { method: "POST", body: { userId: user.id }, timeoutMs: 60000 });
+    const result = await startCodexRuntimeLogin(user.id);
 
     if (result.type === "already_connected") {
-      const status: CodexWorkerStatus = {
+      const status: CodexRuntimeStatus = {
         connected: result.connected === true,
         authMode: result.authMode ?? null,
         email: result.email ?? null,
@@ -143,6 +122,6 @@ export async function handleAiConnectionPOST(request: Request) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "CODEX_LOGIN_FAILED";
-    return NextResponse.json({ error: message }, { status: message === "UNAUTHORIZED" ? 401 : message === "CODEX_WORKER_UNAVAILABLE" ? 503 : 400 });
+    return NextResponse.json({ error: message }, { status: errorStatus(message) });
   }
 }
