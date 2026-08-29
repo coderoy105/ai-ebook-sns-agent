@@ -1,146 +1,100 @@
-/*
-  Small interaction-specific additions that sit on top of the Pressroom
-  design system in globals.css.
-*/
-
 .planning-progress {
-  margin-top: 28px;
+  margin-top: 30px;
+  padding: 24px 0 2px;
   border-top: 1px solid var(--line-strong);
   border-bottom: 1px solid var(--line-strong);
-  padding: 24px 0 4px;
 }
-.planning-progress-head {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 24px;
-}
+.planning-progress-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
 .planning-progress-head > div { min-width: 0; }
-.planning-progress-head span {
-  display: block;
-  margin-bottom: 6px;
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 760;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-.planning-progress-head strong {
-  display: block;
-  color: var(--ink);
-  font-size: 20px;
-  line-height: 1.25;
-}
-.planning-progress-head b {
-  flex: 0 0 auto;
-  color: var(--accent);
-  font-size: clamp(32px, 5vw, 48px);
-  line-height: .9;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -.04em;
-}
-.planning-progress-track {
-  height: 7px;
-  margin-top: 18px;
-  overflow: hidden;
-  background: #dfe4ea;
-}
-.planning-progress-track > span {
-  display: block;
-  height: 100%;
-  background: var(--accent);
-  transition: width .65s cubic-bezier(.2,.8,.2,1);
-}
-.planning-progress-meta {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 24px;
-  margin-top: 10px;
-}
-.planning-progress-meta p {
-  margin: 0;
-  color: var(--muted-strong);
-  font-size: 12px;
-}
-.planning-progress-meta small {
-  flex: 0 0 auto;
-  color: var(--muted);
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-}
-.planning-checkpoints {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  margin: 24px 0 0;
-  padding: 0;
-  list-style: none;
-  border-top: 1px solid var(--line);
-}
-.planning-checkpoints li {
-  min-height: 92px;
-  padding: 16px 14px 12px 0;
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr);
-  gap: 8px;
-  color: #8a929d;
-  border-right: 1px solid var(--line);
-}
+.planning-progress-head span { display: block; margin-bottom: 6px; color: var(--muted); font-size: 10px; font-weight: 720; letter-spacing: .06em; text-transform: uppercase; }
+.planning-progress-head strong { display: block; color: var(--ink); font-size: 19px; line-height: 1.3; }
+.planning-progress-head b { flex: 0 0 auto; color: var(--accent); font-size: 44px; line-height: .92; font-weight: 690; font-variant-numeric: tabular-nums; letter-spacing: -.05em; }
+.planning-progress-track { height: 5px; margin-top: 18px; overflow: hidden; border-radius: 999px; background: #dfe3dc; }
+.planning-progress-track > span { display: block; height: 100%; background: var(--accent); transition: width .55s cubic-bezier(.2,.8,.2,1); }
+.planning-progress-meta { margin-top: 10px; }
+.planning-progress-meta p { margin: 0; color: var(--muted-strong); font-size: 12px; }
+.planning-checkpoints { display: grid; grid-template-columns: repeat(4,1fr); margin: 24px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+.planning-checkpoints li { min-height: 92px; padding: 16px 14px 12px 0; display: grid; grid-template-columns: 22px minmax(0,1fr); gap: 8px; color: #91978e; border-right: 1px solid var(--line); }
 .planning-checkpoints li + li { padding-left: 14px; }
 .planning-checkpoints li:last-child { border-right: 0; }
-.planning-checkpoints li > span {
-  width: 20px;
-  height: 20px;
-  display: grid;
-  place-items: center;
-  border: 1px solid #bfc6cf;
-  border-radius: 50%;
-  font-size: 9px;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-}
-.planning-checkpoints li strong {
-  display: block;
-  color: inherit;
-  font-size: 11px;
-  line-height: 1.2;
-}
-.planning-checkpoints li small {
-  display: block;
-  margin-top: 5px;
-  color: inherit;
-  font-size: 9px;
-  line-height: 1.35;
-}
+.planning-checkpoints li > span { width: 20px; height: 20px; display: grid; place-items: center; border: 1px solid var(--line-strong); border-radius: 50%; font-size: 9px; font-weight: 760; font-variant-numeric: tabular-nums; }
+.planning-checkpoints li strong { display: block; color: inherit; font-size: 11px; line-height: 1.25; }
+.planning-checkpoints li small { display: block; margin-top: 5px; color: inherit; font-size: 10px; line-height: 1.4; }
 .planning-checkpoints li.complete { color: var(--ink-soft); }
-.planning-checkpoints li.complete > span {
-  border-color: var(--green);
-  background: var(--green);
-  color: #fff;
-}
+.planning-checkpoints li.complete > span { border-color: var(--success); background: var(--success); color: #fff; }
 .planning-checkpoints li.current { color: var(--accent); }
-.planning-checkpoints li.current > span {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: #fff;
-  box-shadow: 0 0 0 4px rgba(47,87,212,.1);
-}
-.planning-error .planning-progress-head b,
-.planning-error .planning-progress-head strong { color: var(--danger); }
+.planning-checkpoints li.current > span { border-color: var(--accent); background: var(--accent); color: #fff; box-shadow: 0 0 0 4px var(--accent-soft); }
+.planning-error .planning-progress-head b, .planning-error .planning-progress-head strong { color: var(--danger); }
 .planning-error .planning-progress-track > span { background: var(--danger); }
-.planning-done .planning-progress-head b,
-.planning-done .planning-progress-head strong { color: var(--green); }
-.planning-done .planning-progress-track > span { background: var(--green); }
+.planning-done .planning-progress-head b, .planning-done .planning-progress-head strong { color: var(--success); }
+.planning-done .planning-progress-track > span { background: var(--success); }
 
-@media (max-width: 760px) {
-  .planning-progress { margin-top: 22px; padding-top: 20px; }
-  .planning-progress-head { align-items: start; }
+.codex-usage-strip {
+  max-width: 1220px;
+  min-height: 76px;
+  margin: 0 auto 20px;
+  padding: 14px 16px;
+  display: grid;
+  grid-template-columns: minmax(180px,.72fr) minmax(260px,1fr) minmax(170px,.55fr);
+  align-items: center;
+  gap: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.codex-usage-identity { min-width: 0; display: grid; grid-template-columns: 8px minmax(0,1fr); gap: 10px; align-items: center; }
+.codex-usage-identity > div { min-width: 0; display: grid; gap: 2px; }
+.codex-usage-identity strong { font-size: 12px; }
+.codex-usage-identity small { color: var(--muted); font-size: 10px; }
+.codex-usage-copy { min-width: 0; display: grid; gap: 3px; padding-left: 20px; border-left: 1px solid var(--line); }
+.codex-usage-copy strong { font-size: 11px; }
+.codex-usage-copy span { color: var(--muted-strong); font-size: 10px; line-height: 1.45; }
+.codex-usage-meter { min-width: 0; display: grid; grid-template-columns: 34px minmax(0,1fr); gap: 9px; align-items: center; }
+.codex-usage-meter > span { color: var(--ink-soft); font-size: 10px; font-variant-numeric: tabular-nums; }
+.codex-usage-meter .progress-track i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.codex-usage-warning { border-color: #e7cf9f; background: var(--warning-soft); }
+.codex-usage-warning .status-dot { background: var(--warning); box-shadow: 0 0 0 4px rgba(138,91,5,.09); }
+
+.connection-stage {
+  min-height: 100dvh;
+  padding: clamp(28px,5vw,72px);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 64px;
+  background: var(--canvas);
+}
+.connection-state { width: min(660px,100%); margin: auto 0; }
+.connection-state > span { display: block; margin-bottom: 12px; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
+.connection-state h1 { max-width: 12ch; margin-bottom: 18px; font-size: clamp(2.5rem,5vw,4.5rem); line-height: .98; }
+.connection-state p { max-width: 52ch; margin-bottom: 26px; color: var(--muted-strong); }
+.connection-loader { width: 120px; height: 3px; display: flex; gap: 3px; overflow: hidden; }
+.connection-loader i { flex: 1; background: var(--accent); animation: loadingPulse .8s ease-in-out infinite alternate; }
+.connection-loader i:nth-child(2) { animation-delay: -.22s; }
+.connection-loader i:nth-child(3) { animation-delay: -.44s; }
+.connection-error h1 { color: var(--danger); }
+
+/* The editor side rails contain dense controls, but critical copy must remain legible. */
+.ai-module p, .generation-module > p { font-size: 11px; }
+.panel-actions .button, .ai-box .button { font-size: 10px; }
+.chapter-label, .tree .outline-row > button:first-child > span { font-size: 11px; }
+.tree .outline-row > button:first-child > small, .outline-help, .state-badge, .history-list button span, .history-list button small, .export-link, .log { font-size: 9px; }
+
+@media (max-width: 900px) {
+  .codex-usage-strip { margin-top: 2px; grid-template-columns: minmax(0,.8fr) minmax(0,1.2fr); }
+  .codex-usage-meter { grid-column: 1 / -1; padding-top: 10px; border-top: 1px solid var(--line); }
+}
+
+@media (max-width: 720px) {
+  .planning-progress { margin-top: 24px; padding-top: 20px; }
+  .planning-progress-head { align-items: flex-start; }
   .planning-progress-head strong { font-size: 17px; }
   .planning-progress-head b { font-size: 34px; }
-  .planning-progress-meta { display: block; }
-  .planning-progress-meta small { display: block; margin-top: 7px; }
   .planning-checkpoints { grid-template-columns: 1fr 1fr; }
   .planning-checkpoints li:nth-child(2) { border-right: 0; }
   .planning-checkpoints li:nth-child(n+3) { border-top: 1px solid var(--line); }
   .planning-checkpoints li:nth-child(3) { padding-left: 0; }
+  .codex-usage-strip { grid-template-columns: 1fr; gap: 12px; padding: 14px; }
+  .codex-usage-copy { padding: 12px 0 0; border-top: 1px solid var(--line); border-left: 0; }
+  .codex-usage-meter { grid-column: auto; }
 }

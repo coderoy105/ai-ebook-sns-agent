@@ -5,29 +5,36 @@
 }
 
 .stack {
+  position: relative;
   margin: 0 auto;
   display: grid;
-  gap: 30px;
-  position: relative;
+  gap: 34px;
 }
 
-.pageSlot {
-  position: relative;
-}
+.pageSlot { position: relative; }
 
 .page {
   position: absolute;
   inset: 0 auto auto 0;
   box-sizing: border-box;
-  padding: 72px 76px 80px;
+  padding: 66px 74px 74px;
   display: grid;
-  grid-template-rows: 22px minmax(0, 1fr) 20px;
-  gap: 14px;
+  grid-template-rows: 20px minmax(0, 1fr) 18px;
+  gap: 16px;
   overflow: hidden;
   transform-origin: top left;
   background: #fff;
-  color: #1b1e23;
-  box-shadow: 0 20px 44px rgba(31, 40, 54, .12);
+  color: #1b1d19;
+  border: 1px solid #d7dbd2;
+  box-shadow: 0 18px 48px rgba(26, 30, 23, .12), 0 2px 8px rgba(26, 30, 23, .06);
+}
+
+.page::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.6);
 }
 
 .pageHeader,
@@ -35,25 +42,17 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  color: #8a929d;
-  font-family: "Avenir Next", "Apple SD Gothic Neo", "Pretendard", "Segoe UI", sans-serif;
-  font-size: 9px;
-  font-weight: 700;
+  color: #8b9287;
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Pretendard", "Noto Sans KR", "Segoe UI", sans-serif;
+  font-size: 8px;
+  font-weight: 650;
   letter-spacing: .08em;
   text-transform: uppercase;
   user-select: none;
 }
 
-.pageHeader {
-  padding-bottom: 8px;
-  border-bottom: 1px solid #e2e5e9;
-}
-
-.pageFooter {
-  padding-top: 8px;
-  border-top: 1px solid #e2e5e9;
-  font-variant-numeric: tabular-nums;
-}
+.pageHeader { padding-bottom: 7px; border-bottom: 1px solid #e5e8e1; }
+.pageFooter { padding-top: 7px; border-top: 1px solid #e5e8e1; font-variant-numeric: tabular-nums; }
 
 .editor,
 .measure {
@@ -63,10 +62,10 @@
   border: 0;
   outline: 0;
   background: transparent;
-  color: #1b1e23;
-  font-family: "Iowan Old Style", "Apple SD Gothic Neo", Georgia, serif;
+  color: #1b1d19;
+  font-family: "Iowan Old Style", "Noto Serif KR", "Source Han Serif K", Georgia, serif;
   font-size: 17px;
-  line-height: 1.9;
+  line-height: 1.92;
   letter-spacing: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -84,13 +83,11 @@
   caret-color: var(--accent);
 }
 
-.editor::-webkit-scrollbar {
-  display: none;
-}
-
-.editor:disabled {
-  opacity: .72;
-}
+.editor::selection { background: #d8dfff; color: #111a45; }
+.editor::placeholder { color: #9ca197; }
+.editor::-webkit-scrollbar { display: none; }
+.editor:focus { outline: none; }
+.editor:disabled { opacity: .68; }
 
 .measure {
   position: fixed;
@@ -104,9 +101,10 @@
 }
 
 @media (max-width: 900px) {
-  .stack { gap: 20px; }
+  .stack { gap: 24px; }
+  .page { box-shadow: 0 12px 34px rgba(26,30,23,.1), 0 1px 5px rgba(26,30,23,.05); }
 }
 
 @media (max-width: 520px) {
-  .stack { gap: 16px; }
+  .stack { gap: 18px; }
 }

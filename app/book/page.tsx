@@ -3,10 +3,21 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { ProductMark } from "@/components/product-mark";
 import { createClient } from "@/lib/supabase/client";
 import { BookEditorShell } from "@/app/books/[id]/book-editor-shell";
 import { GenerationProgress } from "@/app/books/[id]/generation-progress";
 import type { Book } from "@/app/books/[id]/book-editor";
+
+function WorkspaceLoading() {
+  return (
+    <main className="workspace-loading" aria-label="원고를 불러오는 중" aria-busy="true">
+      <div className="workspace-loading-rail"><span /><span /><span /><span /></div>
+      <div className="workspace-loading-paper"><i /><i /><i /><i /><i /></div>
+      <div className="workspace-loading-tools"><span /><span /><span /></div>
+    </main>
+  );
+}
 
 export default function BookWorkspacePage() {
   const router = useRouter();
@@ -23,7 +34,7 @@ export default function BookWorkspacePage() {
       const id = new URL(window.location.href).searchParams.get("bookId")?.trim() ?? "";
       if (!active) return;
       if (!id) {
-        setError("BOOK_ID_REQUIRED");
+        setError("원고 ID가 없습니다.");
         setLoading(false);
         return;
       }
@@ -41,7 +52,7 @@ export default function BookWorkspacePage() {
           book_blueprints(blueprint,version,is_active),
           book_covers(concept)
         `).eq("id", id).single();
-        if (queryError || !data) throw new Error(queryError?.message ?? "BOOK_NOT_FOUND");
+        if (queryError || !data) throw new Error(queryError?.message ?? "원고를 찾을 수 없습니다.");
         if (active) setBook(data as unknown as Book);
       } catch (caught) {
         if (active) setError(caught instanceof Error ? caught.message : "원고를 불러오지 못했습니다.");
@@ -52,12 +63,17 @@ export default function BookWorkspacePage() {
     return () => { active = false; };
   }, [router]);
 
-  if (loading) return <main className="main"><p className="muted">원고를 불러오는 중입니다…</p></main>;
+  if (loading) return <WorkspaceLoading />;
   if (!book || !bookId) {
     return (
-      <main className="main">
-        <p className="notice" role="alert">{error || "원고를 찾을 수 없습니다."}</p>
-        <Link className="button secondary" href="/dashboard">작업실로 돌아가기</Link>
+      <main className="workspace-error">
+        <ProductMark />
+        <div>
+          <span>Workspace unavailable</span>
+          <h1>원고를 열 수 없습니다.</h1>
+          <p className="notice" role="alert">{error || "원고를 찾을 수 없습니다."}</p>
+          <Link className="button button-primary" href="/dashboard">작업실로 돌아가기</Link>
+        </div>
       </main>
     );
   }

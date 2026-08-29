@@ -9,9 +9,11 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test \"tests/**/*.test.ts\"",
-    "worker:check": "node --check services/codex-worker/server.mjs"
+    "worker:check": "node --check services/codex-worker/server.mjs",
+    "codex:check": "node ./node_modules/@openai/codex/bin/codex.js --version"
   },
   "dependencies": {
+    "@openai/codex": "0.150.1",
     "@react-pdf/renderer": "^4.3.1",
     "@supabase/ssr": "^0.7.0",
     "@supabase/supabase-js": "^2.57.4",

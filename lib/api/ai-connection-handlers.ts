@@ -7,6 +7,10 @@ import {
   readCodexWorkerStatus,
   type CodexWorkerStatus
 } from "@/lib/ai/codex-worker";
+import {
+  deleteServerlessCodexCredential,
+  startServerlessCodexLoginStream
+} from "@/lib/ai/codex-serverless";
 
 function wantsCodex(request: Request) {
   return new URL(request.url).searchParams.get("provider") === "codex";
@@ -34,7 +38,8 @@ function codexPayload(status: CodexWorkerStatus) {
   return {
     connected: status.connected,
     backgroundReady: status.connected && status.authMode === "chatgpt" && status.modelAvailable,
-    workerConfigured: true,
+    workerConfigured: codexWorkerConfigured(),
+    serverlessFallback: !codexWorkerConfigured(),
     provider: "codex_chatgpt",
     authMode: status.authMode,
     model: CODEX_LUNA_MODEL,
@@ -50,19 +55,6 @@ export async function handleAiConnectionGET(request: Request) {
   try {
     const { user } = await requireUser();
     if (wantsCodex(request)) {
-      if (!codexWorkerConfigured()) {
-        return NextResponse.json({
-          connected: false,
-          backgroundReady: false,
-          workerConfigured: false,
-          provider: "codex_chatgpt",
-          model: CODEX_LUNA_MODEL,
-          modelAvailable: null,
-          planType: null,
-          rateLimits: null,
-          error: "CODEX_WORKER_UNAVAILABLE"
-        });
-      }
       const status = await readCodexWorkerStatus(user.id);
       await syncCodexProfile(user.id, status);
       return NextResponse.json(codexPayload(status));
@@ -83,8 +75,8 @@ export async function handleAiConnectionDELETE(request: Request) {
     const { user } = await requireUser();
     const service = createServiceSupabase();
     if (wantsCodex(request)) {
-      if (!codexWorkerConfigured()) throw new Error("CODEX_WORKER_UNAVAILABLE");
-      await callCodexWorker("/auth/logout", { method: "POST", body: { userId: user.id } });
+      if (codexWorkerConfigured()) await callCodexWorker("/auth/logout", { method: "POST", body: { userId: user.id } });
+      else await deleteServerlessCodexCredential(user.id);
       const { error } = await service.from("codex_connection_profiles").delete().eq("user_id", user.id);
       if (error) throw new Error(error.message);
       return NextResponse.json({ connected: false });
@@ -95,7 +87,7 @@ export async function handleAiConnectionDELETE(request: Request) {
     return NextResponse.json({ connected: false });
   } catch (error) {
     const message = error instanceof Error ? error.message : "AI_DISCONNECT_FAILED";
-    return NextResponse.json({ error: message }, { status: message === "UNAUTHORIZED" ? 401 : message === "CODEX_WORKER_UNAVAILABLE" ? 503 : 400 });
+    return NextResponse.json({ error: message }, { status: message === "UNAUTHORIZED" ? 401 : 400 });
   }
 }
 
@@ -104,7 +96,8 @@ export async function handleAiConnectionPOST(request: Request) {
 
   try {
     const { user } = await requireUser();
-    if (!codexWorkerConfigured()) throw new Error("CODEX_WORKER_UNAVAILABLE");
+    if (!codexWorkerConfigured()) return startServerlessCodexLoginStream(user.id);
+
     const result = await callCodexWorker<{
       type: "chatgptDeviceCode" | "already_connected";
       loginId?: string;
@@ -135,14 +128,9 @@ export async function handleAiConnectionPOST(request: Request) {
     }
 
     if (!result.loginId || !result.verificationUrl || !result.userCode) throw new Error("CODEX_DEVICE_CODE_START_FAILED");
-    return NextResponse.json({
-      type: "device_code",
-      loginId: result.loginId,
-      verificationUrl: result.verificationUrl,
-      userCode: result.userCode
-    });
+    return NextResponse.json({ type: "device_code", loginId: result.loginId, verificationUrl: result.verificationUrl, userCode: result.userCode });
   } catch (error) {
     const message = error instanceof Error ? error.message : "CODEX_LOGIN_FAILED";
-    return NextResponse.json({ error: message }, { status: message === "UNAUTHORIZED" ? 401 : message === "CODEX_WORKER_UNAVAILABLE" ? 503 : 400 });
+    return NextResponse.json({ error: message }, { status: message === "UNAUTHORIZED" ? 401 : 400 });
   }
 }
