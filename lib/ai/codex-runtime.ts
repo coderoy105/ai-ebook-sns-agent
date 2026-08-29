@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createRequire } from "node:module";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 
 export const CODEX_LUNA_MODEL = "gpt-5.6-luna";
@@ -11,6 +11,7 @@ const require = createRequire(import.meta.url);
 type JsonObject = Record<string, unknown>;
 type RpcResponse = { id?: number | string; result?: unknown; error?: { message?: string } };
 type Notification = { method?: string; params?: unknown };
+type CodexEnv = Record<string, string> & { NODE_ENV: string };
 
 type Pending = {
   resolve: (value: unknown) => void;
@@ -25,8 +26,8 @@ type NotificationWaiter = {
   timer: ReturnType<typeof setTimeout>;
 };
 
-function envWithCodexHome(codexHome: string) {
-  const env: Record<string, string> = {};
+function envWithCodexHome(codexHome: string): CodexEnv {
+  const env = { NODE_ENV: process.env.NODE_ENV ?? "production" } as CodexEnv;
   for (const [key, value] of Object.entries(process.env)) {
     if (typeof value === "string") env[key] = value;
   }
@@ -36,7 +37,8 @@ function envWithCodexHome(codexHome: string) {
 }
 
 export function resolveCodexCliEntry() {
-  return require.resolve("@openai/codex/bin/codex.js");
+  const packageJson = require.resolve("@openai/codex/package.json");
+  return join(dirname(packageJson), "bin", "codex.js");
 }
 
 export async function createEphemeralCodexHome(authJson?: string | null) {
