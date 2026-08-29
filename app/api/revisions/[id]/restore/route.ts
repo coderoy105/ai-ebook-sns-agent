@@ -1,6 +1,0 @@
-import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/supabase/server";
-
-export async function POST(_:Request,{params}:{params:Promise<{id:string}>}){
-  try{const {id}=await params;const {supabase,user}=await requireUser();const {data:revision,error}=await supabase.from("revisions").select("*").eq("id",id).single();if(error||!revision)return NextResponse.json({error:"Revision not found"},{status:404});const {data:section}=await supabase.from("sections").select("id,title,content_markdown,book_id").eq("id",revision.section_id).single();if(!section)return NextResponse.json({error:"Section not found"},{status:404});await supabase.from("revisions").insert({book_id:section.book_id,section_id:section.id,user_id:user.id,revision_type:"RESTORE_SNAPSHOT",title_before:section.title,content_before:section.content_markdown,instruction:`Before restoring revision ${id}`});const content=revision.content_before??"";const {error:updateError}=await supabase.from("sections").update({title:revision.title_before??section.title,content_markdown:content,word_count:content.trim().split(/\s+/u).filter(Boolean).length}).eq("id",section.id);if(updateError)throw updateError;return NextResponse.json({ok:true,content});}catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Restore failed"},{status:400});}
-}
