@@ -91,7 +91,7 @@ export function PagedManuscriptEditor({ value, onChange, placeholder, disabled }
         {pages.map((page, index) => (
           <div
             className={styles.pageSlot}
-            key={`${index}-${pages.length}`}
+            key={`page-${index}`}
             style={{ width: PAGE_WIDTH * scale, height: PAGE_HEIGHT * scale }}
           >
             <article
