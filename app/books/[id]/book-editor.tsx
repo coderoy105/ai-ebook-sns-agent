@@ -82,6 +82,7 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
   const [logs,setLogs] = useState<GenerationLog[]>([]);
   const [status,setStatus] = useState({status:book.status,jobStatus:"",progress:Number(book.progress),quality_score:book.quality_score,quality_scores:book.quality_scores});
   const [history,setHistory] = useState<Revision[]>([]);
+  const [mobilePanel,setMobilePanel] = useState<"outline"|"ai"|null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout>|null>(null);
 
   const refreshStatus = useCallback(async()=>{
@@ -155,6 +156,7 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
     if(draft && draft.content!==serverContent){ setContent(draft.content); setSaveState("recovered"); }
     else { setContent(serverContent); setSaveState("saved"); }
     setHistory([]);
+    setMobilePanel(null);
   }
 
   function changeContent(value:string) {
@@ -252,8 +254,16 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
   const providerConnected=aiProvider==="codex"?codexConnected:freeConnected;
   const providerLabel=aiProvider==="codex"?"GPT-5.6 Luna · ChatGPT Plus":"OpenRouter Free";
 
-  return <div className="editor-shell">
-    <aside className="editor-sidebar">
+  return <div className="editor-shell manuscript-editor-shell">
+    <header className="editor-mobile-header">
+      <Link href="/dashboard" className="editor-mobile-back" aria-label="작업실로 돌아가기">←</Link>
+      <div className="editor-mobile-title"><span>{book.book_type}</span><strong>{selected?.title ?? book.title}</strong></div>
+      <button type="button" className="editor-mobile-action" aria-controls="book-ai-panel" aria-expanded={mobilePanel==="ai"} onClick={()=>setMobilePanel(mobilePanel==="ai"?null:"ai")}>AI</button>
+    </header>
+    {mobilePanel&&<button type="button" className="editor-mobile-scrim" aria-label="패널 닫기" onClick={()=>setMobilePanel(null)} />}
+
+    <aside id="book-outline-panel" className={`editor-sidebar ${mobilePanel==="outline"?"mobile-open":""}`}>
+      <div className="mobile-sheet-head"><strong>책 목차</strong><button type="button" onClick={()=>setMobilePanel(null)}>닫기</button></div>
       <Link href="/dashboard" className="editor-brand"><span>AI BOOK</span><strong>STUDIO</strong></Link>
       <div className="manuscript-identity"><span>{book.book_type}</span><strong>{book.title}</strong><p>{book.subtitle || "부제 없음"}</p></div>
       <div className="tree" aria-label="책 목차">
@@ -281,7 +291,8 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
         : <article className="page"><p className="muted">왼쪽 목차에서 편집할 Section을 선택하세요.</p></article>}
     </main>
 
-    <aside className="ai-panel">
+    <aside id="book-ai-panel" className={`ai-panel ${mobilePanel==="ai"?"mobile-open":""}`}>
+      <div className="mobile-sheet-head"><strong>AI · 출판 도구</strong><button type="button" onClick={()=>setMobilePanel(null)}>닫기</button></div>
       <section className="ai-module generation-module">
         <div className="module-heading"><h3>AI 백그라운드 생성</h3><span className={`state-badge state-${(status.jobStatus||status.status).toLowerCase()}`}>{statusLabel(status.status,status.jobStatus)}</span></div>
         <p className="muted">{providerLabel}</p>
@@ -322,5 +333,11 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
 
       {logs.length>0&&<section className="ai-module"><div className="module-heading"><h3>생성 로그</h3></div><div className="log">{logs.slice(0,12).map(log=><div key={log.id}>{new Date(log.created_at).toLocaleTimeString("ko-KR")} · {log.message}</div>)}</div></section>}
     </aside>
+
+    <nav className="editor-mobile-dock" aria-label="원고 편집 도구">
+      <button type="button" aria-controls="book-outline-panel" aria-expanded={mobilePanel==="outline"} onClick={()=>setMobilePanel(mobilePanel==="outline"?null:"outline")}>목차</button>
+      <button type="button" className="current" aria-current="page">원고</button>
+      <button type="button" aria-controls="book-ai-panel" aria-expanded={mobilePanel==="ai"} onClick={()=>setMobilePanel(mobilePanel==="ai"?null:"ai")}>AI · 도구</button>
+    </nav>
   </div>;
 }
