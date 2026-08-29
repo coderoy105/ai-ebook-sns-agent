@@ -55,6 +55,25 @@
 .codex-usage-warning { border-color: #e7cf9f; background: var(--warning-soft); }
 .codex-usage-warning .status-dot { background: var(--warning); box-shadow: 0 0 0 4px rgba(138,91,5,.09); }
 
+.connection-stage {
+  min-height: 100dvh;
+  padding: clamp(28px,5vw,72px);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 64px;
+  background: var(--canvas);
+}
+.connection-state { width: min(660px,100%); margin: auto 0; }
+.connection-state > span { display: block; margin-bottom: 12px; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
+.connection-state h1 { max-width: 12ch; margin-bottom: 18px; font-size: clamp(2.5rem,5vw,4.5rem); line-height: .98; }
+.connection-state p { max-width: 52ch; margin-bottom: 26px; color: var(--muted-strong); }
+.connection-loader { width: 120px; height: 3px; display: flex; gap: 3px; overflow: hidden; }
+.connection-loader i { flex: 1; background: var(--accent); animation: loadingPulse .8s ease-in-out infinite alternate; }
+.connection-loader i:nth-child(2) { animation-delay: -.22s; }
+.connection-loader i:nth-child(3) { animation-delay: -.44s; }
+.connection-error h1 { color: var(--danger); }
+
 /* The editor side rails contain dense controls, but critical copy must remain legible. */
 .ai-module p, .generation-module > p { font-size: 11px; }
 .panel-actions .button, .ai-box .button { font-size: 10px; }
