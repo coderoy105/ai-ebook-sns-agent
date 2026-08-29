@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { CodexPlusProvider } from "@/lib/ai/codex-plus";
+import { generateCodexWorkerStructured } from "@/lib/ai/codex-worker";
 import { SUPABASE_URL } from "@/lib/supabase/config";
 
 const Schema = z.object({
@@ -28,8 +28,7 @@ export async function handleCodexGenerationBridge(request: Request) {
   try {
     await assertProjectOidc(request);
     const input = Schema.parse(await request.json());
-    const provider = new CodexPlusProvider(input.userId);
-    const result = await provider.generateStructured({
+    const result = await generateCodexWorkerStructured(input.userId, {
       schemaName: input.schemaName,
       jsonSchema: input.jsonSchema,
       system: input.system,
