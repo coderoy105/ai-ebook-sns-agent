@@ -1,5 +1,4 @@
 import { OpenRouterFreeProvider } from "@/lib/ai/openrouter-free";
-import { CodexPlusProvider } from "@/lib/ai/codex-plus";
 import { createServiceSupabase } from "@/lib/supabase/server";
 
 export type BackgroundAiProvider = "openrouter" | "codex";
@@ -45,6 +44,10 @@ export async function generateBackgroundStructured<T>(
   args: StructuredArgs<T>
 ) {
   if (provider === "codex") {
+    // Keep the Node-only Codex runtime out of the Workflow module graph until an
+    // actual step/API invocation needs it. Vercel Workflow rejects child_process
+    // and the Codex SDK when they are statically reachable from the workflow body.
+    const { CodexPlusProvider } = await import("@/lib/ai/codex-plus");
     return new CodexPlusProvider(userId).generateStructured(args);
   }
   const key = await loadOpenRouterKey(userId);
