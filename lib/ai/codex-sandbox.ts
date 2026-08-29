@@ -169,20 +169,3 @@ export async function callCodexSandboxWorker<T>(pathWithQuery: string, request: 
     throw new Error("CODEX_SANDBOX_UNAVAILABLE");
   }
 }
-
-export async function probeCodexSandbox() {
-  const probeUser = "00000000-0000-4000-8000-000000000001";
-  const health = await callCodexSandboxWorker<{ ok?: boolean; modelCandidate?: string }>("/health", { timeoutMs: 10_000 });
-  let deviceCode = false;
-  try {
-    const started = await callCodexSandboxWorker<{ type?: string }>("/auth/start", {
-      method: "POST",
-      body: { userId: probeUser },
-      timeoutMs: 60_000
-    });
-    deviceCode = started.type === "chatgptDeviceCode" || started.type === "already_connected";
-  } finally {
-    await callCodexSandboxWorker("/auth/logout", { method: "POST", body: { userId: probeUser }, timeoutMs: 30_000 }).catch(() => undefined);
-  }
-  return { ok: health.ok === true && deviceCode, worker: health.ok === true, deviceCode, modelCandidate: health.modelCandidate ?? null };
-}

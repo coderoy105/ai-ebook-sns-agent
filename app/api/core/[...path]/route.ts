@@ -29,7 +29,6 @@ import {
   handleAiConnectionDELETE
 } from "@/lib/api/ai-connection-handlers";
 import { handleCodexGenerationBridge } from "@/lib/ai/codex-internal";
-import { probeCodexSandbox } from "@/lib/ai/codex-sandbox";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -178,14 +177,6 @@ async function handleOpenRouterExchange(request: Request) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "무료 AI 연결에 실패했습니다.";
     return bad(message, message === "UNAUTHORIZED" ? 401 : 400);
-  }
-}
-
-async function handleCodexSandboxProbe() {
-  try {
-    return NextResponse.json(await probeCodexSandbox(), { status: 200, headers: { "cache-control": "no-store" } });
-  } catch (error) {
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "CODEX_SANDBOX_PROBE_FAILED" }, { status: 503, headers: { "cache-control": "no-store" } });
   }
 }
 
@@ -507,7 +498,6 @@ export async function GET(request: Request, { params }: { params: Promise<{ path
   if (path[0] === "editor") return handleEditorGET(request, path.slice(1));
   if (path[0] === "auth" && path[1] === "ai-connection") return handleAiConnectionGET(request);
   if (path[0] === "health" && path[1] === "service-bridge") return handleHealth();
-  if (path[0] === "health" && path[1] === "codex-sandbox-probe-72f46d0e") return handleCodexSandboxProbe();
   if (path[0] === "books" && path[2] === "export" && path[3]) return handleExport(path[1], path[3]);
   return bad("Unknown core route", 404);
 }
