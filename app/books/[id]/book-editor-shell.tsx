@@ -109,7 +109,9 @@ function PlanningWorkspace({initialBook}:{initialBook:Book}) {
     if(reconnectConsumed.current||!state.job)return;
     reconnectConsumed.current=true;
     const justConnected=consumeFreeAiJustConnected();
-    if(justConnected&&state.job.status==="NEEDS_RECONNECT")void resumePlanning();
+    if(!justConnected||state.job.status!=="NEEDS_RECONNECT")return;
+    const timer=setTimeout(()=>{void resumePlanning();},0);
+    return()=>clearTimeout(timer);
   },[resumePlanning,state.job]);
 
   const jobStatus=state.job?.status??"";
