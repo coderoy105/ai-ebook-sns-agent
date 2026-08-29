@@ -69,22 +69,31 @@ export function CodexUsageStatus() {
   const primaryUsed = usedPercent(snapshot?.primary);
   const secondaryUsed = usedPercent(snapshot?.secondary);
   const reset = resetLabel(snapshot?.primary);
+  const modelUnavailable = status.modelAvailable === false;
 
   return (
-    <section className="research-note" aria-live="polite" style={{ marginBottom: 18 }}>
-      <strong>GPT-5.6 Luna · {prettyPlan(status.planType)} 연결됨</strong>
-      <p>
-        {status.modelAvailable === false
-          ? "현재 Codex model/list에서 GPT-5.6 Luna를 찾지 못했습니다."
-          : primaryUsed == null
-            ? "Codex 연결은 정상입니다. 현재 계정에서 사용량 퍼센트 정보가 제공되지 않았습니다."
-            : `Codex 사용량 ${primaryUsed}%${reset ? ` · 다음 초기화 ${reset}` : ""}${secondaryUsed == null ? "" : ` · 보조 한도 ${secondaryUsed}%`}`}
-      </p>
-      {primaryUsed != null && (
-        <div className="progress-track" aria-label={`Codex 사용량 ${primaryUsed}%`}>
-          <span style={{ width: `${primaryUsed}%` }} />
+    <section className={`codex-usage-strip ${modelUnavailable ? "codex-usage-warning" : ""}`} aria-live="polite" aria-label="ChatGPT Codex 연결 상태">
+      <div className="codex-usage-identity">
+        <span className="status-dot" aria-hidden="true" />
+        <div>
+          <strong>GPT-5.6 Luna</strong>
+          <small>{prettyPlan(status.planType)} · Codex OAuth</small>
         </div>
-      )}
+      </div>
+      <div className="codex-usage-copy">
+        <strong>{modelUnavailable ? "현재 계정에서 Luna를 사용할 수 없습니다." : "ChatGPT 연결됨"}</strong>
+        <span>{modelUnavailable
+          ? "Codex model/list에서 GPT-5.6 Luna가 확인되지 않았습니다."
+          : primaryUsed == null
+            ? "연결은 정상이며 현재 계정은 사용량 퍼센트를 제공하지 않았습니다."
+            : `Codex 사용량 ${primaryUsed}%${reset ? ` · 초기화 ${reset}` : ""}${secondaryUsed == null ? "" : ` · 보조 한도 ${secondaryUsed}%`}`}</span>
+      </div>
+      {primaryUsed != null && !modelUnavailable ? (
+        <div className="codex-usage-meter">
+          <span>{primaryUsed}%</span>
+          <div className="progress-track" aria-label={`Codex 사용량 ${primaryUsed}%`}><i style={{ width: `${primaryUsed}%` }} /></div>
+        </div>
+      ) : null}
     </section>
   );
 }
