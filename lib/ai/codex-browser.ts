@@ -6,6 +6,8 @@ export type CodexDeviceEvent =
   | { type: "connected"; authMode?: string | null; email?: string | null; planType?: string | null; model: string; modelAvailable: boolean; rateLimits?: unknown }
   | { type: "error"; error: string };
 
+export type CodexConnectedEvent = Extract<CodexDeviceEvent, { type: "connected" }>;
+
 export type CodexConnectionStatus = {
   connected: boolean;
   backgroundReady?: boolean;
@@ -32,7 +34,7 @@ export async function disconnectCodexChatGPT() {
 export async function connectCodexChatGPT(options?: {
   onEvent?: (event: CodexDeviceEvent) => void;
   openVerificationPage?: boolean;
-}) {
+}): Promise<CodexConnectedEvent> {
   const response = await fetch("/api/auth/codex/device", { method: "POST", cache: "no-store" });
   if (!response.ok || !response.body) {
     let error = "CODEX_LOGIN_START_FAILED";
@@ -43,7 +45,7 @@ export async function connectCodexChatGPT(options?: {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  let connected: Extract<CodexDeviceEvent, { type: "connected" }> | null = null;
+  const state: { connected?: CodexConnectedEvent } = {};
   let opened = false;
 
   const processLine = (line: string) => {
@@ -55,7 +57,7 @@ export async function connectCodexChatGPT(options?: {
       window.open(event.verificationUrl, "_blank", "noopener,noreferrer");
     }
     if (event.type === "error") throw new Error(event.error || "CODEX_LOGIN_FAILED");
-    if (event.type === "connected") connected = event;
+    if (event.type === "connected") state.connected = event;
   };
 
   while (true) {
@@ -69,6 +71,6 @@ export async function connectCodexChatGPT(options?: {
   buffer += decoder.decode();
   if (buffer.trim()) processLine(buffer);
 
-  if (!connected) throw new Error("CODEX_LOGIN_DID_NOT_COMPLETE");
-  return connected;
+  if (!state.connected) throw new Error("CODEX_LOGIN_DID_NOT_COMPLETE");
+  return state.connected;
 }
