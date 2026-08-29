@@ -1,0 +1,33 @@
+name: One-time remove legacy Codex bridge
+
+on:
+  push:
+    paths:
+      - '.github/workflows/one-time-remove-legacy-codex-bridge.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Remove legacy Core Codex bridge branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('app/api/core/[...path]/route.ts')
+          s=p.read_text()
+          block='''  if (path[0] === "internal" && path[1] === "codex" && path[2] === "generate") {\n    const { handleCodexGenerationBridge } = await import("@/lib/ai/codex-internal");\n    return handleCodexGenerationBridge(request);\n  }\n'''
+          if block not in s:
+              raise SystemExit('legacy bridge block not found')
+          p.write_text(s.replace(block,''))
+          PY
+          git config user.name "AI Book Studio Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add app/api/core/'[...path]'/route.ts
+          git commit -m "refactor: remove legacy Core Codex bridge"
+          git push origin HEAD:main
