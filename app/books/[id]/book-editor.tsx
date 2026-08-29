@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { beginFreeAiConnect, getFreeAiKey } from "@/lib/ai/openrouter-browser";
 
 type Section = { id:string; title:string; goal:string|null; position:number; status:string; target_words:number; word_count:number; content_markdown:string|null; summary:string|null; layout_hint:string|null };
 type Chapter = { id:string; title:string; goal:string|null; position:number; status:string; target_words:number; word_count:number; sections:Section[] };
@@ -28,6 +29,7 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
   const [saveState,setSaveState] = useState("saved");
   const [command,setCommand] = useState("");
   const [busy,setBusy] = useState(false);
+  const [freeConnected,setFreeConnected] = useState(false);
   const [logs,setLogs] = useState<GenerationLog[]>([]);
   const [status,setStatus] = useState({status:book.status,progress:Number(book.progress),quality_score:book.quality_score,quality_scores:book.quality_scores});
   const [history,setHistory] = useState<Revision[]>([]);
@@ -42,6 +44,7 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
   },[book.id]);
 
   useEffect(()=>{
+    setFreeConnected(Boolean(getFreeAiKey()));
     const initialTimer=setTimeout(()=>{void refreshStatus();},0);
     if(!["GENERATING","REVIEWING","PAUSED","PLANNING"].includes(status.status)) return()=>clearTimeout(initialTimer);
     const timer=setInterval(()=>{void refreshStatus();},5000);
@@ -72,14 +75,56 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
     saveTimer.current=setTimeout(()=>{void saveNow(value);},1200);
   }
 
-  async function startGeneration(){ setBusy(true); const r=await fetch(`/api/books/${book.id}/generate`,{method:"POST"}); setBusy(false); if(r.ok){setStatus(s=>({...s,status:"GENERATING"}));void refreshStatus();}else alert((await r.json()).error??"Generation failed"); }
-  async function control(action:"pause"|"resume"|"cancel"){ const r=await fetch(`/api/books/${book.id}/control`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action})}); if(r.ok) void refreshStatus(); }
+  async function connectFreeAi(){ await beginFreeAiConnect(`/books/${book.id}`); }
+
+  async function control(action:"pause"|"resume"|"cancel"){
+    const r=await fetch(`/api/books/${book.id}/control`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action})});
+    if(r.ok) void refreshStatus();
+  }
+
+  async function startGeneration(){
+    const key=getFreeAiKey();
+    if(!key){await connectFreeAi();return;}
+    setFreeConnected(true);
+    setBusy(true);
+    try{
+      if(status.status==="PAUSED"||status.status==="CANCELLED") await control("resume");
+      setStatus(s=>({...s,status:"GENERATING"}));
+      for(let step=0;step<500;step++){
+        const r=await fetch(`/api/books/${book.id}/generate-free`,{method:"POST",headers:{"x-openrouter-key":key}});
+        const data=await r.json();
+        if(!r.ok){
+          if(r.status===409&&(data.paused||data.cancelled)) break;
+          if(r.status===429&&data.error==="FREE_AI_DAILY_LIMIT"){
+            alert("오늘 무료 AI 일일 한도에 도달했습니다. 지금까지 원고는 모두 저장됐습니다. 다음 무료 한도에서 '무료 이어서 생성'을 누르면 계속됩니다.");
+            break;
+          }
+          throw new Error(data.error??"무료 책 생성에 실패했습니다.");
+        }
+        setStatus(s=>({...s,status:data.done?"COMPLETED":"GENERATING",progress:Number(data.progress??s.progress)}));
+        await refreshStatus();
+        if(data.done){
+          alert("무료 AI 책 생성이 완료되었습니다.");
+          location.reload();
+          break;
+        }
+      }
+    }catch(error){
+      alert(error instanceof Error?error.message:"무료 책 생성에 실패했습니다.");
+    }finally{
+      setBusy(false);
+      void refreshStatus();
+    }
+  }
 
   async function aiRewrite(){
-    if(!selected||!command.trim())return; setBusy(true);
-    const r=await fetch(`/api/sections/${selected.id}/rewrite`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({instruction:command})});
+    if(!selected||!command.trim())return;
+    const key=getFreeAiKey();
+    if(!key){await connectFreeAi();return;}
+    setBusy(true);
+    const r=await fetch(`/api/sections/${selected.id}/rewrite`,{method:"POST",headers:{"content-type":"application/json","x-openrouter-key":key},body:JSON.stringify({instruction:command})});
     const data=await r.json(); setBusy(false);
-    if(!r.ok){alert(data.error??"Rewrite failed");return;}
+    if(!r.ok){alert(data.error==="FREE_AI_DAILY_LIMIT"?"오늘 무료 AI 한도에 도달했습니다. 다음 한도에서 다시 사용할 수 있습니다.":data.error??"Rewrite failed");return;}
     setContent(data.markdown);patchLocalSection(selected.id,{content_markdown:data.markdown,summary:data.summary});setCommand("");void loadHistory();
   }
 
@@ -124,15 +169,18 @@ export function BookEditor({ initialBook }: { initialBook: Book }) {
     </main>
 
     <aside className="ai-panel">
-      <div className="eyebrow">Generation</div><div className="meta-row"><strong>{status.status}</strong><span>{Math.round(status.progress)}%</span></div><div className="progress-track"><span style={{width:`${Math.min(100,status.progress)}%`}}/></div>
+      <div className="eyebrow">Free AI Generation</div>
+      <div className="meta-row"><strong>{status.status}</strong><span>{Math.round(status.progress)}%</span></div><div className="progress-track"><span style={{width:`${Math.min(100,status.progress)}%`}}/></div>
+      <p className="muted" style={{fontSize:12}}>{freeConnected?"OpenRouter 무료 AI 연결됨 · 생성 비용 0원":"무료 AI 연결 후 집필을 시작할 수 있습니다."}</p>
       <div className="actions">
-        {["DRAFT","PLANNING","FAILED"].includes(status.status)&&<button className="button" disabled={busy} onClick={startGeneration}>Generate Book</button>}
-        {status.status==="GENERATING"&&<button className="button secondary" onClick={()=>control("pause")}>Pause</button>}
-        {status.status==="PAUSED"&&<button className="button" onClick={()=>control("resume")}>Resume</button>}
-        {["GENERATING","PAUSED","REVIEWING"].includes(status.status)&&<button className="button ghost" onClick={()=>control("cancel")}>Cancel</button>}
+        {!freeConnected&&<button className="button" onClick={connectFreeAi}>무료 AI 연결</button>}
+        {freeConnected&&status.status!=="COMPLETED"&&!busy&&<button className="button" onClick={startGeneration}>{status.progress>0?"무료 이어서 생성":"무료로 책 생성"}</button>}
+        {busy&&<button className="button secondary" onClick={()=>control("pause")}>현재 Section 후 일시정지</button>}
+        {status.status==="PAUSED"&&!busy&&<button className="button secondary" onClick={startGeneration}>무료 이어서 생성</button>}
+        {["GENERATING","PAUSED"].includes(status.status)&&<button className="button ghost" onClick={()=>control("cancel")}>Cancel</button>}
       </div>
 
-      <hr className="rule"/><div className="eyebrow">AI Assistant</div><div className="ai-box field"><textarea value={command} onChange={(e)=>setCommand(e.target.value)} placeholder="예: 이 부분을 중학생이 이해하기 쉽게 바꾸고 구체적인 예시를 하나 추가해."/><button className="button" disabled={busy||!selected||!command.trim()} onClick={aiRewrite}>{busy?"Working…":"Apply to section"}</button></div>
+      <hr className="rule"/><div className="eyebrow">Free AI Assistant</div><div className="ai-box field"><textarea value={command} onChange={(e)=>setCommand(e.target.value)} placeholder="예: 이 부분을 중학생이 이해하기 쉽게 바꾸고 구체적인 예시를 하나 추가해."/><button className="button" disabled={busy||!selected||!command.trim()} onClick={aiRewrite}>{busy?"Working…":"무료 AI로 수정"}</button></div>
 
       <hr className="rule"/><div className="eyebrow">Version history</div><button className="button secondary" disabled={!selected} onClick={loadHistory}>Load history</button><div className="history-list">{history.slice(0,8).map(rev=><button key={rev.id} onClick={()=>restoreRevision(rev.id)}><b>{rev.revision_type}</b><span>{new Date(rev.created_at).toLocaleString("ko-KR")}</span><small>{rev.instruction??"manual edit"}</small></button>)}</div>
 
