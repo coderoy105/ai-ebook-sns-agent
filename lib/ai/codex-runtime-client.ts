@@ -12,7 +12,39 @@ export type CodexRuntimeStatus = {
   rateLimits: unknown;
 };
 
-type RuntimePayload = { error?: string } & Record<string, unknown>;
+type RuntimePayload = { error?: unknown } & Record<string, unknown>;
+
+function safeErrorDetail(value: unknown, depth = 0): unknown {
+  if (depth > 2 || value == null) return value;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+  if (value instanceof Error) {
+    return {
+      name: value.name,
+      message: value.message,
+      cause: safeErrorDetail(value.cause, depth + 1),
+      ...Object.fromEntries(Object.getOwnPropertyNames(value)
+        .filter((key) => !["stack", "cause"].includes(key))
+        .map((key) => [key, safeErrorDetail((value as unknown as Record<string, unknown>)[key], depth + 1)]))
+    };
+  }
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return Object.fromEntries(["name", "message", "code", "status", "statusCode", "cause", "error", "details"]
+      .filter((key) => key in record)
+      .map((key) => [key, safeErrorDetail(record[key], depth + 1)]));
+  }
+  return String(value);
+}
+
+function describeError(value: unknown) {
+  if (typeof value === "string") return value.slice(0, 1600);
+  try {
+    const text = JSON.stringify(safeErrorDetail(value));
+    return text && text !== "{}" ? text.slice(0, 1600) : String(value).slice(0, 1600);
+  } catch {
+    return String(value).slice(0, 1600);
+  }
+}
 
 function runtimeOrigin() {
   const hostname = process.env.VERCEL_URL?.trim() || process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
@@ -21,20 +53,35 @@ function runtimeOrigin() {
 }
 
 export async function callCodexRuntime<T extends RuntimePayload>(action: string, body: Record<string, unknown>, timeoutMs = 60000): Promise<T> {
-  const token = await getVercelOidcToken();
+  let token: string | undefined;
+  try {
+    token = await getVercelOidcToken();
+  } catch (error) {
+    throw new Error(`CODEX_INTERNAL_AUTH_FAILED:${describeError(error)}`);
+  }
   if (!token) throw new Error("CODEX_INTERNAL_AUTH_UNAVAILABLE");
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(`${runtimeOrigin()}/api/codex-runtime/${encodeURIComponent(action)}`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify(body),
-      cache: "no-store",
-      signal: controller.signal
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${runtimeOrigin()}/api/codex-runtime/${encodeURIComponent(action)}`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify(body),
+        cache: "no-store",
+        signal: controller.signal
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") throw error;
+      throw new Error(`CODEX_RUNTIME_FETCH_FAILED:${describeError(error)}`);
+    }
     const payload = await response.json().catch(() => ({ error: `CODEX_RUNTIME_HTTP_${response.status}` })) as T;
-    if (!response.ok || payload.error) throw new Error(payload.error ?? `CODEX_RUNTIME_HTTP_${response.status}`);
+    if (!response.ok || payload.error) {
+      const detail = payload.error ? describeError(payload.error) : `CODEX_RUNTIME_HTTP_${response.status}`;
+      throw new Error(detail);
+    }
     return payload;
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") throw new Error("CODEX_WORKER_TIMEOUT");
