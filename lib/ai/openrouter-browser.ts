@@ -1,6 +1,7 @@
 const KEY_STORAGE = "ai-book-openrouter-key";
 const VERIFIER_STORAGE = "ai-book-openrouter-pkce-verifier";
 const RETURN_STORAGE = "ai-book-openrouter-return";
+const JUST_CONNECTED_STORAGE = "ai-book-openrouter-just-connected";
 
 function base64Url(bytes: Uint8Array) {
   let binary = "";
@@ -19,6 +20,17 @@ export function setFreeAiKey(key: string) {
 
 export function clearFreeAiKey() {
   window.sessionStorage.removeItem(KEY_STORAGE);
+}
+
+export function markFreeAiJustConnected() {
+  window.sessionStorage.setItem(JUST_CONNECTED_STORAGE, "1");
+}
+
+export function consumeFreeAiJustConnected() {
+  if (typeof window === "undefined") return false;
+  const connected = window.sessionStorage.getItem(JUST_CONNECTED_STORAGE) === "1";
+  window.sessionStorage.removeItem(JUST_CONNECTED_STORAGE);
+  return connected;
 }
 
 export function getOpenRouterVerifier() {
