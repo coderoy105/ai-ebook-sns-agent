@@ -1,5 +1,146 @@
 /*
-  Legacy editor overrides were consolidated into globals.css during the
-  Impeccable redesign so the app has one durable visual system and one
-  responsive source of truth.
+  Small interaction-specific additions that sit on top of the Pressroom
+  design system in globals.css.
 */
+
+.planning-progress {
+  margin-top: 28px;
+  border-top: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line-strong);
+  padding: 24px 0 4px;
+}
+.planning-progress-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+}
+.planning-progress-head > div { min-width: 0; }
+.planning-progress-head span {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.planning-progress-head strong {
+  display: block;
+  color: var(--ink);
+  font-size: 20px;
+  line-height: 1.25;
+}
+.planning-progress-head b {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: clamp(32px, 5vw, 48px);
+  line-height: .9;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.04em;
+}
+.planning-progress-track {
+  height: 7px;
+  margin-top: 18px;
+  overflow: hidden;
+  background: #dfe4ea;
+}
+.planning-progress-track > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width .65s cubic-bezier(.2,.8,.2,1);
+}
+.planning-progress-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: 10px;
+}
+.planning-progress-meta p {
+  margin: 0;
+  color: var(--muted-strong);
+  font-size: 12px;
+}
+.planning-progress-meta small {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.planning-checkpoints {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  margin: 24px 0 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+.planning-checkpoints li {
+  min-height: 92px;
+  padding: 16px 14px 12px 0;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 8px;
+  color: #8a929d;
+  border-right: 1px solid var(--line);
+}
+.planning-checkpoints li + li { padding-left: 14px; }
+.planning-checkpoints li:last-child { border-right: 0; }
+.planning-checkpoints li > span {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #bfc6cf;
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.planning-checkpoints li strong {
+  display: block;
+  color: inherit;
+  font-size: 11px;
+  line-height: 1.2;
+}
+.planning-checkpoints li small {
+  display: block;
+  margin-top: 5px;
+  color: inherit;
+  font-size: 9px;
+  line-height: 1.35;
+}
+.planning-checkpoints li.complete { color: var(--ink-soft); }
+.planning-checkpoints li.complete > span {
+  border-color: var(--green);
+  background: var(--green);
+  color: #fff;
+}
+.planning-checkpoints li.current { color: var(--accent); }
+.planning-checkpoints li.current > span {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 0 0 4px rgba(47,87,212,.1);
+}
+.planning-error .planning-progress-head b,
+.planning-error .planning-progress-head strong { color: var(--danger); }
+.planning-error .planning-progress-track > span { background: var(--danger); }
+.planning-done .planning-progress-head b,
+.planning-done .planning-progress-head strong { color: var(--green); }
+.planning-done .planning-progress-track > span { background: var(--green); }
+
+@media (max-width: 760px) {
+  .planning-progress { margin-top: 22px; padding-top: 20px; }
+  .planning-progress-head { align-items: start; }
+  .planning-progress-head strong { font-size: 17px; }
+  .planning-progress-head b { font-size: 34px; }
+  .planning-progress-meta { display: block; }
+  .planning-progress-meta small { display: block; margin-top: 7px; }
+  .planning-checkpoints { grid-template-columns: 1fr 1fr; }
+  .planning-checkpoints li:nth-child(2) { border-right: 0; }
+  .planning-checkpoints li:nth-child(n+3) { border-top: 1px solid var(--line); }
+  .planning-checkpoints li:nth-child(3) { padding-left: 0; }
+}
