@@ -27,12 +27,12 @@ const emptyDetails: ProgressDetails = {
 };
 
 function statusLabel(status: string) {
-  if (status === "GENERATING") return "AI가 책을 작성하고 있어요";
-  if (status === "PAUSED") return "생성이 일시정지됐어요";
-  if (status === "COMPLETED") return "책 생성 완료";
-  if (status === "FAILED") return "생성 중 오류가 발생했어요";
-  if (status === "CANCELLED") return "생성이 취소됐어요";
-  if (status === "PLANNING") return "책 구조를 설계하고 있어요";
+  if (status === "GENERATING") return "AI가 원고를 작성하고 있습니다";
+  if (status === "PAUSED") return "생성이 일시정지됐습니다";
+  if (status === "COMPLETED") return "책 생성이 완료됐습니다";
+  if (status === "FAILED") return "생성 상태를 확인해주세요";
+  if (status === "CANCELLED") return "생성이 취소됐습니다";
+  if (status === "PLANNING") return "책 구조를 설계하고 있습니다";
   return "책 생성 준비";
 }
 
@@ -64,45 +64,23 @@ export function GenerationProgress({ bookId }: { bookId: string }) {
   const { details } = state;
   const currentPath = [details.currentChapterTitle, details.currentSectionTitle].filter(Boolean).join(" › ");
   const sectionText = details.totalSections > 0
-    ? `${details.completedSections}/${details.totalSections} Sections 완료`
+    ? `${details.completedSections} / ${details.totalSections} Sections`
     : "목차 준비 중";
   const wordText = details.targetWords > 0
-    ? `${details.generatedWords.toLocaleString("ko-KR")} / ${details.targetWords.toLocaleString("ko-KR")}단어`
-    : `${details.generatedWords.toLocaleString("ko-KR")}단어 작성`;
+    ? `${details.generatedWords.toLocaleString("ko-KR")} / ${details.targetWords.toLocaleString("ko-KR")} words`
+    : `${details.generatedWords.toLocaleString("ko-KR")} words`;
 
   return (
-    <section
-      className="panel"
-      aria-live="polite"
-      aria-label="책 생성 진행률"
-      style={{
-        position: "fixed",
-        left: "50%",
-        bottom: 18,
-        transform: "translateX(-50%)",
-        zIndex: 50,
-        width: "min(620px, calc(100vw - 28px))",
-        padding: "14px 16px",
-        boxShadow: "0 18px 50px rgba(0,0,0,.18)"
-      }}
-    >
-      <div className="meta-row" style={{ marginBottom: 8 }}>
-        <div>
+    <section className={`generation-dock dock-${state.status.toLowerCase()}`} aria-live="polite" aria-label="책 생성 진행률">
+      <div className="dock-main">
+        <div className="dock-progress-number"><strong>{Math.round(state.progress)}</strong><span>%</span></div>
+        <div className="dock-copy">
           <strong>{statusLabel(state.status)}</strong>
-          <div className="muted" style={{ fontSize: 12, marginTop: 3 }}>
-            {sectionText} · {wordText}
-          </div>
+          <span>{sectionText} · {wordText}</span>
         </div>
-        <strong style={{ fontSize: 22 }}>{Math.round(state.progress)}%</strong>
+        {currentPath && state.status !== "COMPLETED" && <div className="dock-current"><span>현재 작업</span><strong>{currentPath}</strong></div>}
       </div>
-      <div className="progress-track" aria-hidden="true">
-        <span style={{ width: `${state.progress}%` }} />
-      </div>
-      {currentPath && state.status !== "COMPLETED" && (
-        <div style={{ fontSize: 12, marginTop: 8 }}>
-          <span className="muted">현재 작업 중 · </span><strong>{currentPath}</strong>
-        </div>
-      )}
+      <div className="dock-track" aria-hidden="true"><span style={{ width: `${state.progress}%` }} /></div>
     </section>
   );
 }
