@@ -15,10 +15,10 @@ const templates = [
 const BOOK_WIZARD_DRAFT_KEY = "ai-book-studio:book-wizard-draft:v1";
 
 const planningCheckpoints = [
-  { title: "설정 전달", note: "독자 · 문체 · 분량 · 디자인" },
-  { title: "무료 AI 응답", note: "Book Blueprint · 전체 목차" },
-  { title: "프로젝트 저장", note: "생성 결과를 작업실에 연결" },
-  { title: "작업실 열기", note: "원고 집필 화면으로 이동" }
+  { title: "프로젝트 저장", note: "입력 설정을 먼저 안전하게 저장" },
+  { title: "작업 등록", note: "Vercel Workflow에 백그라운드 작업 생성" },
+  { title: "작업실 열기", note: "화면을 나가도 작업은 계속 진행" },
+  { title: "AI 기획 진행", note: "Book Blueprint · 전체 목차를 서버에서 생성" }
 ] as const;
 
 type FormState = {
@@ -81,17 +81,17 @@ function restoreDraft(raw: string | null): { form: FormState; step: number } | n
 
 function checkpointClass(phase: PlanningPhase, index: number) {
   if (phase === "error") return "";
-  const activeIndex = phase === "prepare" ? 0 : phase === "waiting" ? 1 : phase === "saving" ? 2 : 3;
+  const activeIndex = phase === "prepare" ? 0 : phase === "saving" ? 1 : phase === "waiting" ? 2 : 3;
   if (index < activeIndex) return "complete";
   if (index === activeIndex) return phase === "done" ? "complete current" : "current";
   return "";
 }
 
 function PlanningProgressPanel({ progress }: { progress: PlanningProgress }) {
-  const header = progress.phase === "done" ? "완료" : progress.phase === "error" ? "중단" : "Book Blueprint 생성 중";
+  const header = progress.phase === "done" ? "등록 완료" : progress.phase === "error" ? "중단" : "백그라운드 생성 준비";
 
   return (
-    <section className={`planning-progress planning-${progress.phase}`} aria-live="polite" aria-label="Book Blueprint 생성 진행 상황">
+    <section className={`planning-progress planning-${progress.phase}`} aria-live="polite" aria-label="Book Blueprint 백그라운드 작업 등록 상황">
       <div className="planning-progress-head">
         <div>
           <span>{header}</span>
@@ -106,7 +106,6 @@ function PlanningProgressPanel({ progress }: { progress: PlanningProgress }) {
 
       <div className="planning-progress-meta">
         <p>{progress.detail}</p>
-        {progress.phase === "waiting" && <small>경과 {progress.elapsedSeconds}초 · 예상 진행률</small>}
       </div>
 
       <ol className="planning-checkpoints">
@@ -137,7 +136,15 @@ export function BookWizard() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      setFreeConnected(Boolean(getFreeAiKey()));
+      const localConnected = Boolean(getFreeAiKey());
+      setFreeConnected(localConnected);
+      void fetch("/api/auth/openrouter/connection", { cache: "no-store" })
+        .then((response) => response.json().then((payload) => ({ response, payload })))
+        .then(({ response, payload }) => {
+          if (response.ok && payload.connected === true) setFreeConnected(true);
+        })
+        .catch(() => undefined);
+
       const draft = restoreDraft(localStorage.getItem(BOOK_WIZARD_DRAFT_KEY));
       if (draft) {
         setForm(draft.form);
@@ -147,31 +154,6 @@ export function BookWizard() {
     }, 0);
     return () => clearTimeout(timer);
   }, []);
-
-  useEffect(() => {
-    if (!loading) return;
-    const startedAt = Date.now();
-    const tick = () => {
-      const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-      const estimatedPercent = Math.min(88, Math.round(18 + Math.sqrt(Math.max(1, elapsedSeconds)) * 14));
-      setPlanningProgress((previous) => {
-        if (previous && ["saving", "done", "error"].includes(previous.phase)) return previous;
-        return {
-          percent: estimatedPercent,
-          phase: "waiting",
-          label: "무료 AI 응답을 기다리는 중",
-          detail: "Book Blueprint와 전체 목차를 생성하고 있습니다. 이 구간의 퍼센트는 예상 진행률입니다.",
-          elapsedSeconds
-        };
-      });
-    };
-    const firstTick = setTimeout(tick, 450);
-    const timer = setInterval(tick, 900);
-    return () => {
-      clearTimeout(firstTick);
-      clearInterval(timer);
-    };
-  }, [loading]);
 
   const pageEstimate = useMemo(() => {
     const wordsPerPage = form.bookType === "아동용" ? 90 : form.bookType.includes("소설") ? 285 : 310;
@@ -208,14 +190,15 @@ export function BookWizard() {
     await beginFreeAiConnect("/books/new");
   }
 
-  function disconnectFreeAi() {
+  async function disconnectFreeAi() {
     clearFreeAiKey();
     setFreeConnected(false);
+    try { await fetch("/api/auth/openrouter/connection", { method: "DELETE" }); }
+    catch { /* browser session is still disconnected */ }
   }
 
   async function createBook() {
-    const key = getFreeAiKey();
-    if (!key) {
+    if (!freeConnected && !getFreeAiKey()) {
       await connectFreeAi();
       return;
     }
@@ -224,44 +207,59 @@ export function BookWizard() {
     setLoading(true);
     setError("");
     setPlanningProgress({
-      percent: 8,
+      percent: 20,
       phase: "prepare",
-      label: "기획 요청 준비",
-      detail: "선택한 독자, 문체, 분량, 디자인 설정을 무료 AI에 전달합니다.",
+      label: "프로젝트를 저장하는 중",
+      detail: "입력한 독자, 문체, 분량, 디자인 설정을 먼저 서버에 안전하게 저장합니다.",
       elapsedSeconds: 0
     });
 
     try {
+      const key = getFreeAiKey();
+      const headers: Record<string, string> = { "content-type": "application/json" };
+      if (key) headers["x-openrouter-key"] = key;
+
+      setPlanningProgress({
+        percent: 45,
+        phase: "saving",
+        label: "백그라운드 작업을 등록하는 중",
+        detail: "프로젝트를 만든 뒤 Vercel Workflow에 Book Blueprint 생성을 등록합니다.",
+        elapsedSeconds: 0
+      });
+
       const response = await fetch("/api/books", {
         method: "POST",
-        headers: { "content-type": "application/json", "x-openrouter-key": key },
+        headers,
         body: JSON.stringify(form)
       });
       const payload = await response.json();
-      if (!response.ok) {
-        if (payload.error === "FREE_AI_DAILY_LIMIT") throw new Error("오늘 무료 AI 사용 한도에 도달했습니다. 다음 무료 한도에서 다시 시도할 수 있습니다.");
-        throw new Error(payload.error ?? "책 기획 생성에 실패했습니다.");
+      if (response.status === 428 || payload.reconnect) {
+        await connectFreeAi();
+        return;
       }
+      if (!response.ok) throw new Error(payload.error ?? "책 프로젝트 생성에 실패했습니다.");
+      if (!payload.bookId) throw new Error("생성된 책 프로젝트 ID를 받지 못했습니다.");
 
-      setPlanningProgress((previous) => ({
-        percent: 96,
-        phase: "saving",
-        label: "기획안 생성 완료 · 프로젝트 저장 확인",
-        detail: "AI 응답을 받았습니다. 생성된 Book Blueprint와 목차를 작업실에 연결하고 있습니다.",
-        elapsedSeconds: previous?.elapsedSeconds ?? 0
-      }));
+      setPlanningProgress({
+        percent: 85,
+        phase: "waiting",
+        label: "백그라운드 작업 등록 완료",
+        detail: "이제 화면을 나가거나 브라우저를 닫아도 서버가 Book Blueprint와 전체 목차 생성을 계속합니다.",
+        elapsedSeconds: 0
+      });
 
-      await new Promise((resolve) => setTimeout(resolve, 280));
-      setPlanningProgress((previous) => ({
-        percent: 100,
-        phase: "done",
-        label: "Book Blueprint 생성 완료",
-        detail: "책 작업실을 여는 중입니다.",
-        elapsedSeconds: previous?.elapsedSeconds ?? 0
-      }));
       try { localStorage.removeItem(BOOK_WIZARD_DRAFT_KEY); } catch { /* no-op */ }
       setDraftRestored(false);
-      await new Promise((resolve) => setTimeout(resolve, 320));
+
+      setPlanningProgress({
+        percent: 100,
+        phase: "done",
+        label: "작업실에서 계속 확인할 수 있습니다",
+        detail: "작업실을 여는 중입니다. 기획 진행률과 현재 상태는 서버에서 다시 불러옵니다.",
+        elapsedSeconds: 0
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 220));
       router.push(`/books/${payload.bookId}`);
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "생성 실패";
@@ -270,9 +268,9 @@ export function BookWizard() {
       setPlanningProgress((previous) => ({
         percent: previous?.percent ?? 0,
         phase: "error",
-        label: "기획 생성을 완료하지 못했습니다",
-        detail: "아래 오류 내용을 확인한 뒤 다시 시도할 수 있습니다. 입력한 설정은 임시저장되어 있습니다.",
-        elapsedSeconds: previous?.elapsedSeconds ?? 0
+        label: "프로젝트 작업을 등록하지 못했습니다",
+        detail: "입력한 설정은 기기에 임시저장되어 있으므로 다시 시도해도 사라지지 않습니다.",
+        elapsedSeconds: 0
       }));
     } finally {
       setLoading(false);
@@ -286,7 +284,7 @@ export function BookWizard() {
     "어떤 목소리로 설명할까요?",
     "얼마나 깊게 다룰까요?",
     "페이지의 분위기를 정합니다.",
-    "이제 AI가 책의 뼈대를 만듭니다."
+    "프로젝트를 저장하고 백그라운드 생성을 시작합니다."
   ][step];
 
   return (
@@ -302,7 +300,7 @@ export function BookWizard() {
         </ol>
         <div className={`free-ai-rail ${freeConnected ? "connected" : ""}`}>
           <span className="status-dot" aria-hidden="true" />
-          <div><strong>{freeConnected ? "무료 AI 연결됨" : "무료 AI 연결 필요"}</strong><small>OpenRouter 무료 모델</small></div>
+          <div><strong>{freeConnected ? "무료 AI 백그라운드 연결됨" : "무료 AI 연결 필요"}</strong><small>OpenRouter · 서버 Vault</small></div>
         </div>
       </aside>
 
@@ -360,7 +358,7 @@ export function BookWizard() {
               <div className="length-number"><strong>{form.targetPages}</strong><span>pages</span></div>
               <div className="field range-field"><label>목표 분량</label><input type="range" min="20" max="500" step="10" value={form.targetPages} onChange={(event) => update("targetPages", Number(event.target.value))} /></div>
               <div className="length-scale"><span>20p · 짧은 가이드</span><span>500p · 장편</span></div>
-              <p className="wizard-lead">현재 장르 기준 약 <strong>{pageEstimate}단어</strong>를 목표로 잡습니다. 무료 한도에 도달하면 저장한 위치에서 이어서 생성할 수 있습니다.</p>
+              <p className="wizard-lead">현재 장르 기준 약 <strong>{pageEstimate}단어</strong>를 목표로 잡습니다. 무료 한도에 도달하면 저장한 위치에서 Workflow가 대기 후 자동 재개합니다.</p>
             </div>
           )}
 
@@ -380,7 +378,7 @@ export function BookWizard() {
 
           {step === 6 && (
             <div className="wizard-section review-section">
-              <p className="wizard-lead">아래 설정으로 무료 AI가 Book Blueprint와 전체 목차를 먼저 설계합니다.</p>
+              <p className="wizard-lead">먼저 프로젝트를 저장한 뒤, 무료 AI가 Book Blueprint와 전체 목차를 백그라운드에서 설계합니다. 작업실을 나가도 계속됩니다.</p>
               <div className="review-list">
                 <p><b>아이디어</b><span>{form.idea}</span></p>
                 <p><b>책 종류</b><span>{form.bookType}</span></p>
@@ -389,7 +387,7 @@ export function BookWizard() {
                 <p><b>분량</b><span>{form.targetPages} pages · 약 {pageEstimate}단어</span></p>
                 <p><b>Design DNA</b><span>{templates.find((item) => item.id === form.templateMood)?.name ?? form.templateMood}</span></p>
               </div>
-              <div className="research-note"><strong>무료 모드 안내</strong><p>실시간 웹 리서치는 하지 않습니다. 최신 통계나 출처가 중요한 책은 완성 후 별도 사실 검토가 필요합니다.</p></div>
+              <div className="research-note"><strong>백그라운드 무료 모드</strong><p>프로젝트와 진행률은 서버에 저장됩니다. 브라우저를 닫아도 Workflow가 계속되며, 무료 한도에 도달하면 저장된 위치에서 대기 후 자동으로 이어갑니다. 실시간 웹 리서치는 하지 않습니다.</p></div>
             </div>
           )}
 
@@ -398,14 +396,14 @@ export function BookWizard() {
 
           <footer className="wizard-actions">
             <div style={{ marginRight: "auto", alignSelf: "center" }} className="muted" aria-live="polite">
-              <small>{draftRestored ? "이전에 입력한 임시저장을 복원했습니다." : "입력 내용은 이 기기에 자동 임시저장됩니다."}</small>
+              <small>{draftRestored ? "이전에 입력한 임시저장을 복원했습니다." : "작업 등록 전 입력 내용은 이 기기에 자동 임시저장됩니다."}</small>
             </div>
             <button className="button secondary" disabled={step === 0 || loading} onClick={() => goToStep(step - 1)}>이전</button>
             {step < steps.length - 1 ? (
               <button className="button button-primary" disabled={loading || (step === 0 && form.idea.trim().length < 8)} onClick={() => goToStep(step + 1)}>다음 단계</button>
             ) : (
               <button className="button button-primary" disabled={loading || form.idea.trim().length < 8} onClick={createBook}>
-                {loading ? `${Math.round(planningProgress?.percent ?? 0)}% · 기획 생성 중` : freeConnected ? "Book Blueprint 생성" : "무료 AI 연결 후 생성"}
+                {loading ? "프로젝트 저장 · 작업 등록 중…" : freeConnected ? "Book Blueprint 백그라운드 생성" : "무료 AI 연결 후 생성"}
               </button>
             )}
           </footer>
