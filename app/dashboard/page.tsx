@@ -2,6 +2,7 @@ import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { requireUser } from "@/lib/supabase/server";
 
+type JobState = { status?: string; progress?: number; created_at?: string };
 type BookCard = {
   id: string;
   title: string;
@@ -12,13 +13,17 @@ type BookCard = {
   target_pages: number;
   updated_at: string;
   cover: { palette?: string[] } | null;
+  latestJob: JobState | null;
 };
 
-function statusLabel(status: string) {
-  if (status === "GENERATING") return "집필 중";
+function statusLabel(status: string, jobStatus?: string) {
+  if (jobStatus === "WAITING_LIMIT") return "무료 한도 대기";
+  if (jobStatus === "NEEDS_RECONNECT") return "AI 재연결 필요";
+  if (jobStatus === "RETRYING") return "자동 재시도";
+  if (status === "GENERATING") return "백그라운드 집필 중";
   if (status === "PAUSED") return "일시정지";
   if (status === "COMPLETED") return "완료";
-  if (status === "PLANNING") return "구성 중";
+  if (status === "PLANNING") return "백그라운드 기획 중";
   if (status === "FAILED") return "확인 필요";
   return "초안";
 }
@@ -27,13 +32,19 @@ export default async function DashboardPage() {
   const { supabase } = await requireUser();
   const { data } = await supabase
     .from("books")
-    .select("id,title,subtitle,book_type,status,progress,target_pages,updated_at,cover:book_covers(concept)")
+    .select("id,title,subtitle,book_type,status,progress,target_pages,updated_at,cover:book_covers(concept),generation_jobs(status,progress,created_at)")
     .order("updated_at", { ascending: false });
 
-  const books = (data ?? []).map((book) => ({
-    ...book,
-    cover: Array.isArray(book.cover) ? (book.cover[0]?.concept ?? null) : null
-  })) as BookCard[];
+  const books = (data ?? []).map((book) => {
+    const jobs = Array.isArray(book.generation_jobs) ? [...book.generation_jobs] : [];
+    jobs.sort((a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime());
+    const latestJob = jobs[0] ?? null;
+    return {
+      ...book,
+      cover: Array.isArray(book.cover) ? (book.cover[0]?.concept ?? null) : null,
+      latestJob
+    };
+  }) as BookCard[];
 
   const activeCount = books.filter((book) => !["COMPLETED", "CANCELLED"].includes(book.status)).length;
 
@@ -51,7 +62,7 @@ export default async function DashboardPage() {
         <div><strong>{books.length}</strong><span>전체 원고</span></div>
         <div><strong>{activeCount}</strong><span>진행 중</span></div>
         <div><strong>{books.filter((book) => book.status === "COMPLETED").length}</strong><span>완성</span></div>
-        <p>무료 AI 생성은 Section 단위로 저장되며 중간에 멈춰도 이어서 작업할 수 있습니다.</p>
+        <p>기획과 원고 생성은 서버에 작업 상태가 저장되어 화면을 나가도 백그라운드에서 이어집니다.</p>
       </section>
 
       {books.length === 0 ? (
@@ -71,7 +82,9 @@ export default async function DashboardPage() {
           </div>
           <div className="manuscript-list">
             {books.map((book) => {
-              const progress = Math.max(0, Math.min(100, Number(book.progress)));
+              const storedProgress = Number(book.progress);
+              const jobProgress = Number(book.latestJob?.progress ?? 0);
+              const progress = Math.max(0, Math.min(100, book.status === "PLANNING" ? Math.max(storedProgress, jobProgress) : storedProgress));
               return (
                 <Link key={book.id} href={`/books/${book.id}`} className="manuscript-row">
                   <div className="book-spine" aria-hidden="true">
@@ -88,7 +101,7 @@ export default async function DashboardPage() {
                     <div><span>진행률</span><strong>{Math.round(progress)}%</strong></div>
                     <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>
                   </div>
-                  <div className={`manuscript-state state-${book.status.toLowerCase()}`}>{statusLabel(book.status)}</div>
+                  <div className={`manuscript-state state-${(book.latestJob?.status || book.status).toLowerCase()}`}>{statusLabel(book.status, book.latestJob?.status)}</div>
                 </Link>
               );
             })}
