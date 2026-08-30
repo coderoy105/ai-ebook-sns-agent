@@ -56,7 +56,8 @@ async function verifyVercelOidc(req: Request) {
       const { payload } = await jwtVerify(token, jwks, {
         issuer,
         audience: `https://vercel.com/${TEAM_SLUG}`,
-        subject: EXPECTED_SUBJECT
+        subject: EXPECTED_SUBJECT,
+        clockTolerance: 30
       });
       return payload;
     } catch (error) {
