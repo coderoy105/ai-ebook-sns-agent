@@ -5,8 +5,9 @@ import styles from "./export-download-guard.module.css";
 
 type DownloadState = {
   format: string;
-  phase: "preparing" | "done" | "error";
+  phase: "preparing" | "downloading" | "done" | "error";
   message: string;
+  progress: number;
 } | null;
 
 function exportInfo(href: string) {
@@ -30,12 +31,68 @@ function downloadFilename(response: Response, fallbackFormat: string) {
   return `AI-Book-Studio.${fallbackFormat.toLowerCase()}`;
 }
 
+function formatBytes(value: number) {
+  if (value < 1024) return `${value} B`;
+  const kb = value / 1024;
+  if (kb < 1024) return `${kb.toFixed(kb >= 100 ? 0 : 1)} KB`;
+  const mb = kb / 1024;
+  return `${mb.toFixed(mb >= 100 ? 0 : 1)} MB`;
+}
+
 async function responseError(response: Response) {
   try {
     const payload = await response.json() as { error?: unknown };
     if (typeof payload.error === "string" && payload.error.trim()) return payload.error;
   } catch { /* response may not be JSON */ }
   return `다운로드 준비에 실패했습니다. (HTTP ${response.status})`;
+}
+
+async function readResponseWithProgress(
+  response: Response,
+  format: string,
+  onProgress: (received: number, total: number, percent: number) => void
+) {
+  const total = Number(response.headers.get("content-length") ?? 0);
+  if (!response.body) {
+    const blob = await response.blob();
+    onProgress(blob.size, blob.size, 100);
+    return blob;
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  let lastPercent = -1;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value?.byteLength) continue;
+    chunks.push(value);
+    received += value.byteLength;
+
+    const percent = total > 0
+      ? Math.min(99, Math.max(0, Math.floor((received / total) * 100)))
+      : 0;
+    if (percent !== lastPercent) {
+      lastPercent = percent;
+      onProgress(received, total, percent);
+    }
+  }
+
+  if (received === 0) throw new Error("생성된 파일이 비어 있습니다.");
+
+  const bytes = new Uint8Array(received);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  onProgress(received, total || received, 100);
+  return new Blob([bytes], {
+    type: response.headers.get("content-type") ?? (format === "PDF" ? "application/pdf" : "application/octet-stream")
+  });
 }
 
 export function ExportDownloadGuard() {
@@ -53,7 +110,7 @@ export function ExportDownloadGuard() {
       if (busyRef.current) return;
       busyRef.current = true;
       anchor.setAttribute("aria-busy", "true");
-      setState({ format, phase: "preparing", message: `${format} 파일을 준비하고 있습니다…` });
+      setState({ format, phase: "preparing", progress: 0, message: `${format} 생성 중 · 다운로드 0%` });
 
       try {
         const response = await fetch(url.toString(), {
@@ -64,8 +121,24 @@ export function ExportDownloadGuard() {
         });
         if (!response.ok) throw new Error(await responseError(response));
 
-        const blob = await response.blob();
-        if (!blob.size) throw new Error("생성된 파일이 비어 있습니다.");
+        const total = Number(response.headers.get("content-length") ?? 0);
+        setState({
+          format,
+          phase: "downloading",
+          progress: 0,
+          message: total > 0 ? `${format} 다운로드 0% · 0 B / ${formatBytes(total)}` : `${format} 다운로드 시작 · 0%`
+        });
+
+        const blob = await readResponseWithProgress(response, format, (received, expected, percent) => {
+          setState({
+            format,
+            phase: "downloading",
+            progress: percent,
+            message: expected > 0
+              ? `${format} 다운로드 ${percent}% · ${formatBytes(received)} / ${formatBytes(expected)}`
+              : `${format} 다운로드 ${percent}% · ${formatBytes(received)}`
+          });
+        });
 
         const blobUrl = URL.createObjectURL(blob);
         const download = document.createElement("a");
@@ -78,11 +151,11 @@ export function ExportDownloadGuard() {
         download.remove();
         setTimeout(() => URL.revokeObjectURL(blobUrl), 15_000);
 
-        setState({ format, phase: "done", message: `${format} 다운로드를 시작했습니다.` });
-        scheduleClear(2800);
+        setState({ format, phase: "done", progress: 100, message: `${format} 다운로드 100% · 저장을 시작했습니다.` });
+        scheduleClear(3200);
       } catch (error) {
         const message = error instanceof Error ? error.message : "파일 다운로드에 실패했습니다.";
-        setState({ format, phase: "error", message });
+        setState({ format, phase: "error", progress: 0, message });
         scheduleClear(8000);
       } finally {
         anchor.removeAttribute("aria-busy");
@@ -117,8 +190,19 @@ export function ExportDownloadGuard() {
       aria-live="polite"
     >
       <span className={styles.format}>{state.format}</span>
-      <span>{state.message}</span>
-      {state.phase === "preparing" && <span className={styles.progress} aria-hidden="true" />}
+      <span className={styles.message}>{state.message}</span>
+      {state.phase !== "error" && (
+        <div
+          className={styles.progressTrack}
+          role="progressbar"
+          aria-label={`${state.format} 다운로드 진행률`}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={state.progress}
+        >
+          <span className={styles.progressFill} style={{ width: `${state.progress}%` }} />
+        </div>
+      )}
     </div>
   );
 }
