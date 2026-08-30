@@ -23,6 +23,11 @@ export function exportArtifactPath(userId: string, jobId: string, extension: str
   return `exports/${safeSegment(userId)}/${safeSegment(jobId)}.${safeSegment(extension)}`;
 }
 
+export function exportChunkPath(userId: string, jobId: string, chunkIndex: number) {
+  if (!Number.isInteger(chunkIndex) || chunkIndex < 0) throw new Error("EXPORT_CHUNK_INDEX_INVALID");
+  return `export-chunks/${safeSegment(userId)}/${safeSegment(jobId)}/${String(chunkIndex).padStart(4, "0")}.pdf`;
+}
+
 export async function writeExportArtifact(input: {
   userId: string;
   jobId: string;
@@ -38,6 +43,27 @@ export async function writeExportArtifact(input: {
     path,
     byteLength: input.bytes.byteLength
   };
+}
+
+export async function writeExportChunk(input: {
+  userId: string;
+  jobId: string;
+  chunkIndex: number;
+  bytes: Uint8Array;
+}) {
+  if (!input.bytes.byteLength) throw new Error("EXPORT_CHUNK_EMPTY");
+  const path = exportChunkPath(input.userId, input.jobId, input.chunkIndex);
+  const sandbox = await getExportSandbox();
+  await sandbox.writeFiles([{ path, content: Buffer.from(input.bytes) }]);
+  return { path, byteLength: input.bytes.byteLength };
+}
+
+export async function readExportChunk(userId: string, jobId: string, chunkIndex: number) {
+  const sandbox = await getExportSandbox();
+  const path = exportChunkPath(userId, jobId, chunkIndex);
+  const buffer = await sandbox.readFileToBuffer({ path });
+  if (!buffer?.byteLength) throw new Error(`EXPORT_CHUNK_NOT_FOUND:${chunkIndex}`);
+  return buffer;
 }
 
 export async function readExportArtifact(path: string) {
