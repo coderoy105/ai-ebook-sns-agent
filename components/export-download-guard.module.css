@@ -27,22 +27,26 @@
   color: #2458d3;
 }
 
-.progress {
+.message {
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.progressTrack {
   grid-column: 1 / -1;
-  height: 2px;
+  height: 6px;
   overflow: hidden;
   border-radius: 999px;
   background: #deded8;
 }
 
-.progress::after {
-  content: "";
+.progressFill {
   display: block;
-  width: 38%;
+  width: 0;
   height: 100%;
   border-radius: inherit;
   background: #2458d3;
-  animation: export-progress 1.15s ease-in-out infinite alternate;
+  transition: width 160ms linear;
 }
 
 .error {
@@ -55,11 +59,6 @@
   color: #a44436;
 }
 
-@keyframes export-progress {
-  from { transform: translateX(-15%); }
-  to { transform: translateX(180%); }
-}
-
 @media (min-width: 720px) {
   .notice {
     left: auto;
@@ -70,5 +69,5 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .progress::after { animation: none; width: 100%; }
+  .progressFill { transition: none; }
 }
