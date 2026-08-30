@@ -1,4 +1,5 @@
 import { Sandbox } from "@vercel/sandbox";
+import { isTransientCodexError } from "@/lib/ai/transient-codex-errors";
 
 const SANDBOX_NAME = "ai-book-studio-codex-runtime-v1";
 const REPOSITORY_URL = "https://github.com/coderoy105/ai-ebook-sns-agent.git";
@@ -66,6 +67,11 @@ export function isRecoverableSandboxTransportError(error: unknown) {
       : describeError(error);
   return code === "sandbox_stream_closed"
     || /sandbox_stream_closed|Sandbox stream was closed|not accepting commands|sandbox.*stream.*closed/i.test(message);
+}
+
+function isWorkerRpcTimeout(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /^CODEX_RPC_TIMEOUT$/i.test(message.trim());
 }
 
 async function readVersion(sandbox: Sandbox) {
@@ -155,6 +161,18 @@ async function ensureWorkerRunning(sandbox: Sandbox) {
   throw new Error("CODEX_SANDBOX_WORKER_START_FAILED");
 }
 
+async function restartWorkerAfterRpcTimeout(sandbox: Sandbox) {
+  const stop = await sandbox.runCommand({
+    cmd: "sh",
+    args: ["-lc", "pkill -f '[c]odex.js app-server' || true; pkill -f '[n]ode server.mjs' || true"],
+    cwd: WORKER_DIR,
+    timeoutMs: 10_000
+  });
+  if (stop.exitCode !== 0) throw commandError("CODEX_SANDBOX_WORKER_RESET_FAILED", stop.exitCode, await stop.stderr());
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  await ensureWorkerRunning(sandbox);
+}
+
 async function acquireSandbox() {
   if (!codexSandboxSupported()) throw new Error("CODEX_SANDBOX_UNAVAILABLE");
   try {
@@ -198,18 +216,36 @@ async function getSandbox() {
 
 async function requestWithSandboxReconnect<T>(pathWithQuery: string, request: SandboxWorkerRequest) {
   let lastError: unknown = new Error("CODEX_SANDBOX_UNAVAILABLE");
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  let rpcTimeouts = 0;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    let sandbox: Sandbox | null = null;
     try {
-      const sandbox = await getSandbox();
+      sandbox = await getSandbox();
       return await localRequest<T>(sandbox, pathWithQuery, request);
     } catch (error) {
       lastError = error;
-      if (!isRecoverableSandboxTransportError(error) || attempt > 0) throw error;
-      // A warm Vercel function can retain an SDK handle after its control stream
-      // has closed. Drop that handle and retrieve the named persistent sandbox
-      // again so the SDK opens a fresh stream and auto-resumes the VM.
-      sandboxPromise = null;
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      if (isRecoverableSandboxTransportError(error) && attempt < 3) {
+        // A warm Vercel function can retain an SDK handle after its control stream
+        // has closed. Drop that handle and retrieve the named persistent sandbox
+        // again so the SDK opens a fresh stream and auto-resumes the VM.
+        sandboxPromise = null;
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        continue;
+      }
+      if (isWorkerRpcTimeout(error) && sandbox && attempt < 3) {
+        rpcTimeouts += 1;
+        // One delayed RPC can recover on its own. If it happens twice in the same
+        // request, recycle the local worker/App Server while keeping CODEX_HOME on
+        // persistent disk, then retry the exact request from the caller.
+        if (rpcTimeouts >= 2) await restartWorkerAfterRpcTimeout(sandbox);
+        else await new Promise((resolve) => setTimeout(resolve, 750));
+        continue;
+      }
+      if (isTransientCodexError(error) && attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        continue;
+      }
+      throw error;
     }
   }
   throw lastError;
