@@ -1,5 +1,6 @@
 import React from "react";
 import { Document, Font, Page, StyleSheet, Text, View, renderToBuffer } from "@react-pdf/renderer";
+import { PDFDocument } from "pdf-lib";
 import type { ExportBook } from "./collect";
 import { stripMarkdown } from "./collect";
 
@@ -62,7 +63,7 @@ function Paragraphs({ markdown }: { markdown: string }) {
   return <>{paragraphs.map((paragraph, index) => <Text key={index} style={s.paragraph}>{paragraph}</Text>)}</>;
 }
 
-function BookPdf({ book }: { book: ExportBook }) {
+function FrontMatterPdf({ book }: { book: ExportBook }) {
   return (
     <Document title={book.title} author="AI Book Studio" language="ko-KR">
       <Page size="A5" style={s.cover}>
@@ -73,7 +74,6 @@ function BookPdf({ book }: { book: ExportBook }) {
         </View>
         <Text style={s.kicker}>AI BOOK STUDIO</Text>
       </Page>
-
       <Page size="A5" style={s.page} wrap>
         <Text style={s.tocTitle}>Contents</Text>
         {book.parts.map((part) => (
@@ -87,27 +87,77 @@ function BookPdf({ book }: { book: ExportBook }) {
           </View>
         ))}
       </Page>
+    </Document>
+  );
+}
 
-      {book.parts.flatMap((part) => part.chapters.flatMap((chapter) =>
-        chapter.sections.map((section, sectionIndex) => (
-          <Page key={section.id} size="A5" style={s.page} wrap>
-            <Text style={s.part}>{part.title.toUpperCase()}</Text>
-            {sectionIndex === 0 && <Text style={s.chapterTitle}>{chapter.title}</Text>}
-            <Text style={s.sectionTitle}>{section.title}</Text>
-            <Paragraphs markdown={section.content_markdown ?? ""} />
-            <Text style={s.endMark}>{book.title}</Text>
-          </Page>
-        ))
+function ChapterPdf({
+  book,
+  part,
+  chapter
+}: {
+  book: ExportBook;
+  part: ExportBook["parts"][number];
+  chapter: ExportBook["parts"][number]["chapters"][number];
+}) {
+  return (
+    <Document title={`${book.title} · ${chapter.title}`} author="AI Book Studio" language="ko-KR">
+      {chapter.sections.map((section, sectionIndex) => (
+        <Page key={section.id} size="A5" style={s.page} wrap>
+          <Text style={s.part}>{part.title.toUpperCase()}</Text>
+          {sectionIndex === 0 && <Text style={s.chapterTitle}>{chapter.title}</Text>}
+          <Text style={s.sectionTitle}>{section.title}</Text>
+          <Paragraphs markdown={section.content_markdown ?? ""} />
+          <Text style={s.endMark}>{book.title}</Text>
+        </Page>
       ))}
     </Document>
   );
 }
 
-export async function renderBookPdf(book: ExportBook) {
-  registerFonts();
-  const buffer = await renderToBuffer(<BookPdf book={book} />);
+function assertPdf(buffer: Buffer) {
   if (buffer.length < 5 || buffer.subarray(0, 4).toString("ascii") !== "%PDF") {
     throw new Error("PDF_RENDER_INVALID");
   }
+}
+
+async function appendPdf(target: PDFDocument, sourceBuffer: Buffer) {
+  assertPdf(sourceBuffer);
+  const source = await PDFDocument.load(sourceBuffer);
+  const pages = await target.copyPages(source, source.getPageIndices());
+  pages.forEach((page) => target.addPage(page));
+}
+
+export type PdfRenderProgress = (progress: number, message: string) => void | Promise<void>;
+
+export async function renderBookPdf(book: ExportBook, onProgress?: PdfRenderProgress) {
+  registerFonts();
+  const chapters = book.parts.flatMap((part) => part.chapters.map((chapter) => ({ part, chapter })));
+  const target = await PDFDocument.create();
+  target.setTitle(book.title);
+  target.setAuthor("AI Book Studio");
+  target.setCreator("AI Book Studio");
+
+  await onProgress?.(4, "표지와 목차를 만들고 있습니다.");
+  const front = await renderToBuffer(<FrontMatterPdf book={book} />);
+  await appendPdf(target, front);
+  await onProgress?.(10, "표지와 목차를 완성했습니다.");
+
+  const total = Math.max(1, chapters.length);
+  for (let index = 0; index < chapters.length; index += 1) {
+    const { part, chapter } = chapters[index];
+    const chunk = await renderToBuffer(<ChapterPdf book={book} part={part} chapter={chapter} />);
+    await appendPdf(target, chunk);
+    const chapterProgress = 10 + Math.round(((index + 1) / total) * 76);
+    await onProgress?.(
+      Math.min(86, chapterProgress),
+      `Chapter ${index + 1}/${chapters.length} PDF를 만들고 있습니다.`
+    );
+  }
+
+  await onProgress?.(90, "PDF 조각을 하나의 파일로 합치고 있습니다.");
+  const bytes = await target.save({ useObjectStreams: true });
+  const buffer = Buffer.from(bytes);
+  assertPdf(buffer);
   return buffer;
 }
