@@ -22,6 +22,16 @@ type QueryState = {
   onConflict?: string;
 };
 
+const OIDC_CLOCK_SKEW_DELAYS_MS = [1500, 3000];
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isOidcClockSkewError(payload: BridgeResult<unknown>, status: number) {
+  return status === 401 && /JWT issued at future|issued in the future|not active yet|JWTClaimValidationFailed/i.test(payload.error?.message ?? "");
+}
+
 async function bridgeRequest<T = unknown>(body: Record<string, unknown>): Promise<BridgeResult<T>> {
   let oidcToken = process.env.VERCEL_OIDC_TOKEN;
   if (!oidcToken) {
@@ -36,20 +46,34 @@ async function bridgeRequest<T = unknown>(body: Record<string, unknown>): Promis
   }
   if (!oidcToken) throw new Error("Vercel OIDC token is unavailable.");
 
-  const response = await fetch(`${SUPABASE_URL}/functions/v1/ai-book-service`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${oidcToken}`,
-      "content-type": "application/json"
-    },
-    body: JSON.stringify(body),
-    cache: "no-store"
-  });
-  const payload = await response.json().catch(() => ({ data: null, error: { message: `Bridge HTTP ${response.status}` } })) as BridgeResult<T>;
-  if (!response.ok && !payload.error) {
-    return { data: null as T, error: { message: `Bridge HTTP ${response.status}` } };
+  const requestBody = JSON.stringify(body);
+  const send = async () => {
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/ai-book-service`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${oidcToken}`,
+        "content-type": "application/json"
+      },
+      body: requestBody,
+      cache: "no-store"
+    });
+    const payload = await response.json().catch(() => ({ data: null, error: { message: `Bridge HTTP ${response.status}` } })) as BridgeResult<T>;
+    return { response, payload };
+  };
+
+  let result = await send();
+  for (const delayMs of OIDC_CLOCK_SKEW_DELAYS_MS) {
+    if (!isOidcClockSkewError(result.payload as BridgeResult<unknown>, result.response.status)) break;
+    // Keep the same signed token and let wall-clock time catch up to its iat/nbf.
+    // Minting a replacement immediately can reproduce the same positive skew.
+    await sleep(delayMs);
+    result = await send();
   }
-  return payload;
+
+  if (!result.response.ok && !result.payload.error) {
+    return { data: null as T, error: { message: `Bridge HTTP ${result.response.status}` } };
+  }
+  return result.payload;
 }
 
 class RemoteQueryBuilder<T = LooseRow[]> implements PromiseLike<BridgeResult<T>> {
@@ -64,10 +88,7 @@ class RemoteQueryBuilder<T = LooseRow[]> implements PromiseLike<BridgeResult<T>>
   update(values: unknown) { this.state.action = "update"; this.state.values = values; return this; }
   delete() { this.state.action = "delete"; return this; }
   upsert(values: unknown, options?: { onConflict?: string }) {
-    this.state.action = "upsert";
-    this.state.values = values;
-    this.state.onConflict = options?.onConflict;
-    return this;
+    this.state.action = "upsert"; this.state.values = values; this.state.onConflict = options?.onConflict; return this;
   }
 
   eq(column: string, value: unknown) { this.state.filters.push({ op: "eq", column, value }); return this; }
