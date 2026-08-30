@@ -15,6 +15,7 @@ const exportFormats = {
 } as const;
 
 const BACKGROUND_JOB_MAX_AGE_MS = 2 * 60 * 60 * 1000;
+const BACKGROUND_HEARTBEAT_MAX_AGE_MS = 6 * 60 * 1000;
 
 type ExportFormat = keyof typeof exportFormats;
 type ServiceSupabase = Awaited<ReturnType<typeof requireUser>>["supabase"];
@@ -78,9 +79,14 @@ function completedExportIsFresh(bookUpdatedAt: unknown, finishedAt: unknown) {
 
 function activeBackgroundJobIsReusable(job: { created_at?: unknown; error_message?: unknown }) {
   const createdAt = Date.parse(String(job.created_at ?? ""));
-  const recent = Number.isFinite(createdAt) && Date.now() - createdAt <= BACKGROUND_JOB_MAX_AGE_MS;
+  if (!Number.isFinite(createdAt) || Date.now() - createdAt > BACKGROUND_JOB_MAX_AGE_MS) return false;
+
   const progress = decodeExportProgress(typeof job.error_message === "string" ? job.error_message : null);
-  return recent && /백그라운드/.test(progress?.message ?? "");
+  if (!progress || !/백그라운드/.test(progress.message)) return false;
+
+  const heartbeatAt = Date.parse(String(progress.updatedAt ?? ""));
+  if (!Number.isFinite(heartbeatAt)) return false;
+  return Date.now() - heartbeatAt <= BACKGROUND_HEARTBEAT_MAX_AGE_MS;
 }
 
 export async function startBookExport(bookId: string, rawFormat: string) {
@@ -103,7 +109,7 @@ export async function startBookExport(bookId: string, rawFormat: string) {
       }
       await supabase.from("export_jobs").update({
         status: "FAILED",
-        error_message: "STALE_FOREGROUND_EXPORT_REPLACED",
+        error_message: "STALE_BACKGROUND_EXPORT_REPLACED",
         finished_at: new Date().toISOString()
       }).eq("id", existing.id);
     }
@@ -209,20 +215,23 @@ export async function getBookExportStatus(bookId: string, rawFormat: string, job
         phase: "ready",
         background: true,
         ready: true,
-        message: "백그라운드 파일 생성이 완료되었습니다. 다운로드를 시작합니다."
+        message: "백그라운드 파일 생성이 완료되었습니다. PDF 버튼을 누르면 바로 다운로드됩니다."
       }, { headers: { "cache-control": "no-store" } });
     }
 
     const progress = decodeExportProgress(job.error_message) ?? {
       progress: job.status === "QUEUED" ? 1 : 2,
       phase: "queued" as const,
-      message: "백그라운드에서 파일을 만들고 있습니다. 앱을 닫아도 계속 진행됩니다."
+      message: "백그라운드에서 파일을 만들고 있습니다. 앱을 닫아도 계속 진행됩니다.",
+      updatedAt: null
     };
+    const stale = (job.status === "QUEUED" || job.status === "RUNNING") && !activeBackgroundJobIsReusable(job);
     return NextResponse.json({
       jobId: job.id,
       status: job.status,
       background: true,
       ready: false,
+      stale,
       ...progress
     }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
@@ -231,7 +240,12 @@ export async function getBookExportStatus(bookId: string, rawFormat: string, job
   }
 }
 
-export async function handleBookExport(bookId: string, rawFormat: string, jobId?: string | null) {
+export async function handleBookExport(
+  bookId: string,
+  rawFormat: string,
+  jobId?: string | null,
+  acceptHeader?: string | null
+) {
   try {
     if (!(rawFormat in exportFormats)) return bad("Unsupported format");
     const format = rawFormat as ExportFormat;
@@ -247,6 +261,13 @@ export async function handleBookExport(bookId: string, rawFormat: string, jobId?
     });
     if (jobError || !job) return bad("Export job not found", 404);
     if (job.status !== "COMPLETED" || !job.asset_id) {
+      if (acceptHeader?.includes("text/html")) {
+        const location = `/books/${encodeURIComponent(bookId)}?export=${encodeURIComponent(format)}&jobId=${encodeURIComponent(String(job.id))}`;
+        return new NextResponse(null, {
+          status: 303,
+          headers: { location, "cache-control": "no-store" }
+        });
+      }
       return NextResponse.json({
         error: "EXPORT_NOT_READY",
         jobId: job.id,
