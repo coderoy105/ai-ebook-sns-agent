@@ -115,6 +115,10 @@ function ChapterPdf({
   );
 }
 
+function chapterEntries(book: ExportBook) {
+  return book.parts.flatMap((part) => part.chapters.map((chapter) => ({ part, chapter })));
+}
+
 function assertPdf(buffer: Buffer) {
   if (buffer.length < 5 || buffer.subarray(0, 4).toString("ascii") !== "%PDF") {
     throw new Error("PDF_RENDER_INVALID");
@@ -128,26 +132,55 @@ async function appendPdf(target: PDFDocument, sourceBuffer: Buffer) {
   pages.forEach((page) => target.addPage(page));
 }
 
-export type PdfRenderProgress = (progress: number, message: string) => void | Promise<void>;
+export function pdfChapterCount(book: ExportBook) {
+  return chapterEntries(book).length;
+}
 
-export async function renderBookPdf(book: ExportBook, onProgress?: PdfRenderProgress) {
+export async function renderBookPdfFrontChunk(book: ExportBook) {
   registerFonts();
-  const chapters = book.parts.flatMap((part) => part.chapters.map((chapter) => ({ part, chapter })));
+  const buffer = await renderToBuffer(<FrontMatterPdf book={book} />);
+  assertPdf(buffer);
+  return buffer;
+}
+
+export async function renderBookPdfChapterChunk(book: ExportBook, chapterIndex: number) {
+  registerFonts();
+  const chapters = chapterEntries(book);
+  const entry = chapters[chapterIndex];
+  if (!entry) throw new Error(`PDF_CHAPTER_NOT_FOUND:${chapterIndex}`);
+  const buffer = await renderToBuffer(<ChapterPdf book={book} part={entry.part} chapter={entry.chapter} />);
+  assertPdf(buffer);
+  return buffer;
+}
+
+export async function mergeBookPdfChunks(title: string, chunks: Array<Buffer | Uint8Array>) {
+  if (!chunks.length) throw new Error("PDF_CHUNKS_EMPTY");
   const target = await PDFDocument.create();
-  target.setTitle(book.title);
+  target.setTitle(title);
   target.setAuthor("AI Book Studio");
   target.setCreator("AI Book Studio");
 
+  for (const chunk of chunks) await appendPdf(target, Buffer.from(chunk));
+
+  const bytes = await target.save({ useObjectStreams: true });
+  const buffer = Buffer.from(bytes);
+  assertPdf(buffer);
+  return buffer;
+}
+
+export type PdfRenderProgress = (progress: number, message: string) => void | Promise<void>;
+
+export async function renderBookPdf(book: ExportBook, onProgress?: PdfRenderProgress) {
+  const chapters = chapterEntries(book);
+  const chunks: Buffer[] = [];
+
   await onProgress?.(4, "표지와 목차를 만들고 있습니다.");
-  const front = await renderToBuffer(<FrontMatterPdf book={book} />);
-  await appendPdf(target, front);
+  chunks.push(await renderBookPdfFrontChunk(book));
   await onProgress?.(10, "표지와 목차를 완성했습니다.");
 
   const total = Math.max(1, chapters.length);
   for (let index = 0; index < chapters.length; index += 1) {
-    const { part, chapter } = chapters[index];
-    const chunk = await renderToBuffer(<ChapterPdf book={book} part={part} chapter={chapter} />);
-    await appendPdf(target, chunk);
+    chunks.push(await renderBookPdfChapterChunk(book, index));
     const chapterProgress = 10 + Math.round(((index + 1) / total) * 76);
     await onProgress?.(
       Math.min(86, chapterProgress),
@@ -156,8 +189,5 @@ export async function renderBookPdf(book: ExportBook, onProgress?: PdfRenderProg
   }
 
   await onProgress?.(90, "PDF 조각을 하나의 파일로 합치고 있습니다.");
-  const bytes = await target.save({ useObjectStreams: true });
-  const buffer = Buffer.from(bytes);
-  assertPdf(buffer);
-  return buffer;
+  return mergeBookPdfChunks(book.title, chunks);
 }
