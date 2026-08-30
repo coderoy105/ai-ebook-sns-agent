@@ -5,18 +5,28 @@ import { requireUser } from "@/lib/supabase/server";
 import { hasBackgroundCredential } from "@/lib/ai/provider-connection";
 import { normalizeBackgroundProvider } from "@/lib/ai/background-provider";
 import { generateFreeBlueprintWorkflow } from "@/lib/jobs/free-blueprint-workflow";
+import { generateFreeBookWorkflow } from "@/lib/jobs/free-book-workflow";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const STALE_PLANNING_MS = 3 * 60 * 1000;
+const STALE_GENERATION_MS = 30 * 1000;
+const MAX_GENERATION_AUTO_RECOVERIES = 2;
 const ACTIVE_PLANNING_STATUSES = ["QUEUED", "PLANNING", "RETRYING", "WAITING_LIMIT"];
 const RECOVERABLE_PLANNING_FAILURES = new Set([
   "WORKER_ERROR",
   "CODEX_OUTPUT_SCHEMA_INVALID",
   "CODEX_GENERATION_FAILED"
 ]);
+const RECOVERABLE_GENERATION_FAILURES = new Set([
+  "CODEX_SANDBOX_UNAVAILABLE",
+  "CODEX_SANDBOX_ACQUIRE_FAILED",
+  "CODEX_SANDBOX_LOCAL_CALL_FAILED",
+  "WORKER_ERROR"
+]);
+const GENERATION_RECOVERY_LOG = "일시적인 Codex Sandbox 연결 오류를 감지해 저장된 Section부터 자동 재개했습니다.";
 
 const PlanningInputSchema = z.object({
   idea: z.string().min(8).max(8000),
@@ -51,6 +61,14 @@ type JobRow = {
   created_at: string;
   updated_at: string | null;
 };
+type LogRow = {
+  id: string;
+  level: string;
+  message: string;
+  metadata: unknown;
+  created_at: string;
+  generation_job_id: string | null;
+};
 
 function one<T>(value: Relation<T>): T | null {
   return Array.isArray(value) ? (value[0] ?? null) : value;
@@ -73,6 +91,28 @@ function isRecoverablePlanningJob(bookStatus: string, job: JobRow) {
     && RECOVERABLE_PLANNING_FAILURES.has(job.failure_reason ?? "")
     && stale;
   return activeStale || knownTechnicalFailure;
+}
+
+function generationRecoveryCount(job: JobRow, logs: LogRow[]) {
+  return logs.filter((log) => log.generation_job_id === job.id && log.message === GENERATION_RECOVERY_LOG).length;
+}
+
+function hasRecoverableGenerationEvidence(job: JobRow, logs: LogRow[]) {
+  const reason = (job.failure_reason ?? "").split(":", 1)[0];
+  if (RECOVERABLE_GENERATION_FAILURES.has(reason)) return true;
+  return logs.some((log) => log.generation_job_id === job.id && (
+    /CODEX_SANDBOX_(?:UNAVAILABLE|ACQUIRE_FAILED|LOCAL_CALL_FAILED)/.test(log.message)
+    || /sandbox_stream_closed|Sandbox stream was closed/i.test(log.message)
+  ));
+}
+
+function isRecoverableGenerationJob(bookStatus: string, job: JobRow, logs: LogRow[]) {
+  return bookStatus === "PAUSED"
+    && job.status === "PAUSED_ERROR"
+    && Number(job.progress ?? 0) < 100
+    && activityAgeMs(job) >= STALE_GENERATION_MS
+    && generationRecoveryCount(job, logs) < MAX_GENERATION_AUTO_RECOVERIES
+    && hasRecoverableGenerationEvidence(job, logs);
 }
 
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -108,15 +148,21 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     const settingsRelation = book.book_settings as unknown as Relation<SettingsRow>;
     const planningInput = PlanningInputSchema.safeParse(one(settingsRelation)?.planning_input);
     const provider = normalizeBackgroundProvider(planningInput.success ? planningInput.data.aiProvider : undefined);
+    const logRows = (logs ?? []) as unknown as LogRow[];
     let latestJob = (jobs?.[0] ?? null) as JobRow | null;
     let bookStatus = String(book.status ?? "DRAFT");
     let recovery: { state: string; runId?: string; error?: string } | null = null;
 
-    const shouldRecover = latestJob !== null
+    const recoverPlanning = latestJob !== null
       && planningInput.success
       && isRecoverablePlanningJob(bookStatus, latestJob);
+    const recoverGeneration = latestJob !== null
+      && planningInput.success
+      && provider === "codex"
+      && isRecoverableGenerationJob(bookStatus, latestJob, logRows);
+    const shouldRecover = recoverPlanning || recoverGeneration;
 
-    if (shouldRecover && latestJob) {
+    if (shouldRecover && latestJob && planningInput.success) {
       const credentialReady = await hasBackgroundCredential(user.id, provider);
       if (!credentialReady) {
         const now = new Date().toISOString();
@@ -128,6 +174,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
         recovery = { state: "needs-reconnect" };
       } else {
         const previousRunId = latestJob.workflow_run_id;
+        const previousProgress = Number(latestJob.progress ?? 0);
         let claim = supabase.from("generation_jobs").update({
           status: "RETRYING",
           workflow_run_id: null,
@@ -142,49 +189,90 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
 
         if (claimed) {
           try {
-            const run = await start(generateFreeBlueprintWorkflow, [{
-              bookId,
-              userId: user.id,
-              jobId: latestJob.id,
-              form: planningInput.data
-            }]);
-            const now = new Date().toISOString();
-            await Promise.all([
-              supabase.from("generation_jobs").update({
+            if (recoverGeneration) {
+              const run = await start(generateFreeBookWorkflow, [{
+                bookId,
+                userId: user.id,
+                jobId: latestJob.id,
+                provider
+              }]);
+              const now = new Date().toISOString();
+              await Promise.all([
+                supabase.from("generation_jobs").update({
+                  workflow_run_id: run.runId,
+                  status: "GENERATING",
+                  progress: previousProgress,
+                  failure_reason: null,
+                  started_at: now,
+                  updated_at: now
+                }).eq("id", latestJob.id),
+                supabase.from("books").update({ status: "GENERATING", updated_at: now }).eq("id", bookId),
+                supabase.from("job_logs").insert({
+                  generation_job_id: latestJob.id,
+                  level: "warning",
+                  message: GENERATION_RECOVERY_LOG
+                })
+              ]);
+              latestJob = {
+                ...latestJob,
+                status: "GENERATING",
+                progress: previousProgress,
                 workflow_run_id: run.runId,
+                failure_reason: null,
+                updated_at: now
+              };
+              bookStatus = "GENERATING";
+              recovery = { state: "recovered-generation", runId: run.runId };
+            } else {
+              const run = await start(generateFreeBlueprintWorkflow, [{
+                bookId,
+                userId: user.id,
+                jobId: latestJob.id,
+                form: planningInput.data
+              }]);
+              const now = new Date().toISOString();
+              await Promise.all([
+                supabase.from("generation_jobs").update({
+                  workflow_run_id: run.runId,
+                  status: "PLANNING",
+                  progress: 8,
+                  failure_reason: null,
+                  started_at: now,
+                  updated_at: now
+                }).eq("id", latestJob.id),
+                supabase.from("books").update({ status: "PLANNING", updated_at: now }).eq("id", bookId),
+                supabase.from("job_logs").insert({
+                  generation_job_id: latestJob.id,
+                  level: "warning",
+                  message: "중단된 Book Blueprint 작업을 감지해 최신 Workflow에서 자동 복구했습니다."
+                })
+              ]);
+              latestJob = {
+                ...latestJob,
                 status: "PLANNING",
                 progress: 8,
+                workflow_run_id: run.runId,
                 failure_reason: null,
-                started_at: now,
                 updated_at: now
-              }).eq("id", latestJob.id),
-              supabase.from("books").update({ status: "PLANNING", updated_at: now }).eq("id", bookId),
-              supabase.from("job_logs").insert({
-                generation_job_id: latestJob.id,
-                level: "warning",
-                message: "중단된 Book Blueprint 작업을 감지해 최신 Workflow에서 자동 복구했습니다."
-              })
-            ]);
-            latestJob = {
-              ...latestJob,
-              status: "PLANNING",
-              progress: 8,
-              workflow_run_id: run.runId,
-              failure_reason: null,
-              updated_at: now
-            };
-            bookStatus = "PLANNING";
-            recovery = { state: "recovered", runId: run.runId };
+              };
+              bookStatus = "PLANNING";
+              recovery = { state: "recovered", runId: run.runId };
+            }
           } catch (caught) {
-            const message = caught instanceof Error ? caught.message : "PLANNING_RECOVERY_FAILED";
+            const message = caught instanceof Error ? caught.message : "RECOVERY_FAILED";
             const now = new Date().toISOString();
+            const failedBookStatus = recoverGeneration ? "PAUSED" : "FAILED";
             await Promise.all([
               supabase.from("generation_jobs").update({ status: "PAUSED_ERROR", failure_reason: message, updated_at: now }).eq("id", latestJob.id),
-              supabase.from("books").update({ status: "FAILED", updated_at: now }).eq("id", bookId),
-              supabase.from("job_logs").insert({ generation_job_id: latestJob.id, level: "error", message: `Book Blueprint 자동 복구 실패: ${message}` })
+              supabase.from("books").update({ status: failedBookStatus, updated_at: now }).eq("id", bookId),
+              supabase.from("job_logs").insert({
+                generation_job_id: latestJob.id,
+                level: "error",
+                message: recoverGeneration ? `원고 생성 자동 복구 실패: ${message}` : `Book Blueprint 자동 복구 실패: ${message}`
+              })
             ]);
             latestJob = { ...latestJob, status: "PAUSED_ERROR", failure_reason: message, workflow_run_id: null, updated_at: now };
-            bookStatus = "FAILED";
+            bookStatus = failedBookStatus;
             recovery = { state: "failed", error: message };
           }
         } else {
@@ -224,7 +312,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
         currentChapterTitle: current ? one(current.chapter)?.title ?? null : null
       },
       job: latestJob,
-      logs: logs ?? [],
+      logs: logRows,
       recovery
     });
   } catch (error) {
