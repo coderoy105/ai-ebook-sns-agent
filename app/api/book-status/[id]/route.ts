@@ -4,6 +4,7 @@ import { start } from "workflow/api";
 import { requireUser } from "@/lib/supabase/server";
 import { hasBackgroundCredential } from "@/lib/ai/provider-connection";
 import { normalizeBackgroundProvider } from "@/lib/ai/background-provider";
+import { isTransientCodexError } from "@/lib/ai/transient-codex-errors";
 import { generateFreeBlueprintWorkflow } from "@/lib/jobs/free-blueprint-workflow";
 import { generateFreeBookWorkflow } from "@/lib/jobs/free-book-workflow";
 
@@ -13,20 +14,14 @@ export const maxDuration = 300;
 
 const STALE_PLANNING_MS = 3 * 60 * 1000;
 const STALE_GENERATION_MS = 30 * 1000;
-const MAX_GENERATION_AUTO_RECOVERIES = 2;
+const MAX_GENERATION_AUTO_RECOVERIES = 3;
 const ACTIVE_PLANNING_STATUSES = ["QUEUED", "PLANNING", "RETRYING", "WAITING_LIMIT"];
 const RECOVERABLE_PLANNING_FAILURES = new Set([
   "WORKER_ERROR",
   "CODEX_OUTPUT_SCHEMA_INVALID",
   "CODEX_GENERATION_FAILED"
 ]);
-const RECOVERABLE_GENERATION_FAILURES = new Set([
-  "CODEX_SANDBOX_UNAVAILABLE",
-  "CODEX_SANDBOX_ACQUIRE_FAILED",
-  "CODEX_SANDBOX_LOCAL_CALL_FAILED",
-  "WORKER_ERROR"
-]);
-const GENERATION_RECOVERY_LOG = "일시적인 Codex Sandbox 연결 오류를 감지해 저장된 Section부터 자동 재개했습니다.";
+const GENERATION_RECOVERY_LOG = "일시적인 Codex 런타임 오류를 감지해 저장된 Section부터 자동 재개했습니다.";
 
 const PlanningInputSchema = z.object({
   idea: z.string().min(8).max(8000),
@@ -98,17 +93,14 @@ function generationRecoveryCount(job: JobRow, logs: LogRow[]) {
 }
 
 function hasRecoverableGenerationEvidence(job: JobRow, logs: LogRow[]) {
-  const reason = (job.failure_reason ?? "").split(":", 1)[0];
-  if (RECOVERABLE_GENERATION_FAILURES.has(reason)) return true;
-  return logs.some((log) => log.generation_job_id === job.id && (
-    /CODEX_SANDBOX_(?:UNAVAILABLE|ACQUIRE_FAILED|LOCAL_CALL_FAILED)/.test(log.message)
-    || /sandbox_stream_closed|Sandbox stream was closed/i.test(log.message)
-  ));
+  if (job.failure_reason && isTransientCodexError(job.failure_reason)) return true;
+  return logs.some((log) => log.generation_job_id === job.id && isTransientCodexError(log.message));
 }
 
 function isRecoverableGenerationJob(bookStatus: string, job: JobRow, logs: LogRow[]) {
+  const recoverableState = job.status === "PAUSED_ERROR" || job.status === "NEEDS_RECONNECT";
   return bookStatus === "PAUSED"
-    && job.status === "PAUSED_ERROR"
+    && recoverableState
     && Number(job.progress ?? 0) < 100
     && activityAgeMs(job) >= STALE_GENERATION_MS
     && generationRecoveryCount(job, logs) < MAX_GENERATION_AUTO_RECOVERIES
@@ -163,7 +155,11 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     const shouldRecover = recoverPlanning || recoverGeneration;
 
     if (shouldRecover && latestJob && planningInput.success) {
-      const credentialReady = await hasBackgroundCredential(user.id, provider);
+      // A transient Codex RPC/Sandbox failure must not be converted into an auth
+      // failure just because the separate status probe also times out. Restart the
+      // saved generation first; the generation call itself will return an explicit
+      // CODEX_CONNECTION_REQUIRED/EXPIRED if user authorization is truly gone.
+      const credentialReady = recoverGeneration ? true : await hasBackgroundCredential(user.id, provider);
       if (!credentialReady) {
         const now = new Date().toISOString();
         await supabase.from("generation_jobs").update({
