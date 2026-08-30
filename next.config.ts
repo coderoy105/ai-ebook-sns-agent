@@ -17,7 +17,7 @@ const nextConfig: NextConfig = {
       { source: "/api/health/service-bridge", destination: "/api/core/health/service-bridge" },
       { source: "/api/books/:id/control", destination: "/api/core/editor/book/:id/control" },
       { source: "/api/books/:id/outline", destination: "/api/core/editor/book/:id/outline" },
-      { source: "/api/books/:id/status", destination: "/api/core/editor/book/:id/status" },
+      { source: "/api/books/:id/status", destination: "/api/book-status/:id" },
       { source: "/api/outline/:kind/:id", destination: "/api/core/editor/outline/:kind/:id" },
       { source: "/api/sections/:id/revisions", destination: "/api/core/editor/section/:id/revisions" },
       { source: "/api/sections/:id/rewrite", destination: "/api/core/editor/section/:id/rewrite" },
