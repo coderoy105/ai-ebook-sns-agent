@@ -14,8 +14,9 @@ const exportFormats = {
   txt: { type: "text/plain; charset=utf-8", ext: "txt" }
 } as const;
 
-type ExportFormat = keyof typeof exportFormats;
+const BACKGROUND_JOB_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 
+type ExportFormat = keyof typeof exportFormats;
 type ServiceSupabase = Awaited<ReturnType<typeof requireUser>>["supabase"];
 
 function bad(message: string, status = 400) {
@@ -58,15 +59,13 @@ async function latestExportJob(
   supabase: ServiceSupabase,
   input: { bookId: string; userId: string; format: ExportFormat; jobId?: string | null }
 ) {
-  let query = supabase.from("export_jobs")
+  const query = supabase.from("export_jobs")
     .select("id,book_id,user_id,format,status,asset_id,error_message,created_at,finished_at")
     .eq("book_id", input.bookId)
     .eq("user_id", input.userId)
     .eq("format", input.format.toUpperCase());
 
-  if (input.jobId) {
-    return query.eq("id", input.jobId).maybeSingle();
-  }
+  if (input.jobId) return query.eq("id", input.jobId).maybeSingle();
   return query.order("created_at", { ascending: false }).limit(1).maybeSingle();
 }
 
@@ -75,6 +74,13 @@ function completedExportIsFresh(bookUpdatedAt: unknown, finishedAt: unknown) {
   const exportTime = Date.parse(String(finishedAt ?? ""));
   if (!Number.isFinite(bookTime) || !Number.isFinite(exportTime)) return false;
   return exportTime >= bookTime;
+}
+
+function activeBackgroundJobIsReusable(job: { created_at?: unknown; error_message?: unknown }) {
+  const createdAt = Date.parse(String(job.created_at ?? ""));
+  const recent = Number.isFinite(createdAt) && Date.now() - createdAt <= BACKGROUND_JOB_MAX_AGE_MS;
+  const progress = decodeExportProgress(typeof job.error_message === "string" ? job.error_message : null);
+  return recent && /백그라운드/.test(progress?.message ?? "");
 }
 
 export async function startBookExport(bookId: string, rawFormat: string) {
@@ -87,13 +93,21 @@ export async function startBookExport(bookId: string, rawFormat: string) {
 
     const { data: existing } = await latestExportJob(supabase, { bookId, userId: user.id, format });
     if (existing && (existing.status === "QUEUED" || existing.status === "RUNNING")) {
-      return NextResponse.json({
-        jobId: existing.id,
-        status: existing.status,
-        background: true,
-        reused: true
-      }, { status: 202, headers: { "cache-control": "no-store" } });
+      if (activeBackgroundJobIsReusable(existing)) {
+        return NextResponse.json({
+          jobId: existing.id,
+          status: existing.status,
+          background: true,
+          reused: true
+        }, { status: 202, headers: { "cache-control": "no-store" } });
+      }
+      await supabase.from("export_jobs").update({
+        status: "FAILED",
+        error_message: "STALE_FOREGROUND_EXPORT_REPLACED",
+        finished_at: new Date().toISOString()
+      }).eq("id", existing.id);
     }
+
     if (
       existing &&
       existing.status === "COMPLETED" &&
