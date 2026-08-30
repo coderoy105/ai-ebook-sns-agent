@@ -9,6 +9,8 @@ import {
   type CodexRuntimeStatus
 } from "@/lib/ai/codex-runtime-client";
 
+const ACTIVE_JOB_STATUSES = ["QUEUED", "PLANNING", "GENERATING", "RETRYING", "WAITING_LIMIT"];
+
 function wantsCodex(request: Request) {
   return new URL(request.url).searchParams.get("provider") === "codex";
 }
@@ -47,10 +49,10 @@ function codexPayload(status: CodexRuntimeStatus) {
   };
 }
 
-async function cachedCodexPayload(userId: string) {
+async function cachedCodexPayload(userId: string, statusSource = "cached") {
   const service = createServiceSupabase();
   const { data } = await service.from("codex_connection_profiles")
-    .select("email,plan_type,selected_model,model_available,rate_limits")
+    .select("email,plan_type,selected_model,model_available,rate_limits,updated_at")
     .eq("user_id", userId)
     .maybeSingle();
   if (!data || data.model_available !== true) return null;
@@ -66,8 +68,23 @@ async function cachedCodexPayload(userId: string) {
     planType: data.plan_type ?? null,
     email: data.email ?? null,
     rateLimits: data.rate_limits ?? null,
-    statusSource: "cached"
+    statusSource,
+    lastVerifiedAt: data.updated_at ?? null
   };
+}
+
+async function activeGenerationUsesCachedStatus(userId: string) {
+  const service = createServiceSupabase();
+  const { data, error } = await service.from("generation_jobs")
+    .select("id")
+    .eq("user_id", userId)
+    .in("status", ACTIVE_JOB_STATUSES)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return null;
+  return cachedCodexPayload(userId, "active-generation-cache");
 }
 
 function errorStatus(message: string) {
@@ -85,13 +102,20 @@ export async function handleAiConnectionGET(request: Request) {
   try {
     const { user } = await requireUser();
     if (wantsCodex(request)) {
+      // A running background job already verified the persisted ChatGPT session.
+      // Do not send account/model/rate-limit probes to the same Codex app-server
+      // while it is producing a Section: those probes contend with the active turn
+      // and can surface as CODEX_WORKER_TIMEOUT in the editor.
+      const activeCached = await activeGenerationUsesCachedStatus(user.id);
+      if (activeCached) return NextResponse.json(activeCached);
+
       try {
         const status = await readCodexRuntimeStatus(user.id);
         await syncCodexProfile(user.id, status);
         return NextResponse.json({ ...codexPayload(status), statusSource: "live" });
       } catch (error) {
         if (!isTransientCodexError(error)) throw error;
-        const cached = await cachedCodexPayload(user.id);
+        const cached = await cachedCodexPayload(user.id, "transient-status-cache");
         if (cached) return NextResponse.json(cached);
         throw error;
       }
@@ -133,11 +157,22 @@ export async function handleAiConnectionPOST(request: Request) {
   try {
     const { user } = await requireUser();
 
-    // Never start a new Device Code flow merely because a transient RPC/status
-    // check failed. First require a successful status read. If the persisted
-    // ChatGPT session is still valid, return it directly and leave CODEX_HOME
-    // untouched.
-    const current = await readCodexRuntimeStatus(user.id);
+    // If a book is already generating, do not start another Device Code flow just
+    // because a separate connection probe is slow. The generation request itself
+    // is the authority for explicit CODEX_CONNECTION_REQUIRED/EXPIRED errors.
+    const activeCached = await activeGenerationUsesCachedStatus(user.id);
+    if (activeCached) return NextResponse.json({ type: "connected", ...activeCached });
+
+    let current: CodexRuntimeStatus;
+    try {
+      current = await readCodexRuntimeStatus(user.id);
+    } catch (error) {
+      if (!isTransientCodexError(error)) throw error;
+      const cached = await cachedCodexPayload(user.id, "transient-status-cache");
+      if (cached) return NextResponse.json({ type: "connected", ...cached });
+      throw error;
+    }
+
     if (current.connected) {
       await syncCodexProfile(user.id, current);
       return NextResponse.json({ type: "connected", ...codexPayload(current) });
