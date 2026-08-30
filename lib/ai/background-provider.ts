@@ -1,7 +1,3 @@
-import { OpenRouterFreeProvider } from "@/lib/ai/openrouter-free";
-import { createServiceSupabase } from "@/lib/supabase/server";
-import { generateCodexRuntimeStructured } from "@/lib/ai/codex-runtime-client";
-
 export type BackgroundAiProvider = "openrouter" | "codex";
 
 type StructuredArgs<T> = {
@@ -34,6 +30,9 @@ export function backgroundProviderCheckpointPrefix(provider: BackgroundAiProvide
 }
 
 async function loadOpenRouterKey(userId: string) {
+  // Vercel Workflow also imports this module for pure provider helpers.
+  // Keep Node/server-only dependencies lazy so they execute only inside a `use step` call.
+  const { createServiceSupabase } = await import("@/lib/supabase/server");
   const service = createServiceSupabase();
   const { data, error } = await service.rpc<string | null>("get_openrouter_credential", { p_user_id: userId });
   if (error) throw new Error(error.message);
@@ -45,9 +44,14 @@ export async function generateBackgroundStructured<T>(
   userId: string,
   args: StructuredArgs<T>
 ): Promise<{ value: T; usage: Usage }> {
-  if (provider === "codex") return generateCodexRuntimeStructured(userId, args);
+  if (provider === "codex") {
+    const { generateCodexRuntimeStructured } = await import("@/lib/ai/codex-runtime-client");
+    return generateCodexRuntimeStructured(userId, args);
+  }
+
   const key = await loadOpenRouterKey(userId);
   if (!key) throw new Error("FREE_AI_CONNECTION_REQUIRED");
+  const { OpenRouterFreeProvider } = await import("@/lib/ai/openrouter-free");
   const client = new OpenRouterFreeProvider(key);
   return client.generateStructured({ model: "openrouter/free", ...args });
 }
