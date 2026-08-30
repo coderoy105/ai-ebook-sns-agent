@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 import { CODEX_LUNA_MODEL } from "@/lib/ai/codex-constants";
+import { isTransientCodexError } from "@/lib/ai/transient-codex-errors";
 import {
   logoutCodexRuntime,
   readCodexRuntimeStatus,
@@ -48,7 +49,12 @@ function codexPayload(status: CodexRuntimeStatus) {
 
 function errorStatus(message: string) {
   if (message === "UNAUTHORIZED") return 401;
-  if (message === "CODEX_RUNTIME_UNAVAILABLE" || message === "CODEX_INTERNAL_AUTH_UNAVAILABLE" || message === "CODEX_WORKER_UNAVAILABLE") return 503;
+  if (
+    message === "CODEX_RUNTIME_UNAVAILABLE" ||
+    message === "CODEX_INTERNAL_AUTH_UNAVAILABLE" ||
+    message === "CODEX_WORKER_UNAVAILABLE" ||
+    isTransientCodexError(message)
+  ) return 503;
   return 400;
 }
 
@@ -96,6 +102,18 @@ export async function handleAiConnectionPOST(request: Request) {
 
   try {
     const { user } = await requireUser();
+
+    // Never start a new Device Code flow merely because a transient RPC/status
+    // check failed. First require a successful status read. If the persisted
+    // ChatGPT session is still valid, return it directly and leave CODEX_HOME
+    // untouched.
+    const current = await readCodexRuntimeStatus(user.id);
+    if (current.connected) {
+      await syncCodexProfile(user.id, current);
+      return NextResponse.json({ type: "connected", ...codexPayload(current) });
+    }
+
+    await syncCodexProfile(user.id, current);
     const result = await startCodexRuntimeLogin(user.id);
 
     if (result.type === "already_connected") {
