@@ -167,7 +167,7 @@ export async function handleBookExport(bookId: string, rawFormat: string, jobId?
     const bookOwner = await ownedBook(bookId, user.id, supabase);
     if (!bookOwner) return bad("Book not found", 404);
 
-    let activeJobId = jobId ?? null;
+    let activeJobId = jobId ?? "";
     if (activeJobId) {
       const { data: existing } = await supabase.from("export_jobs")
         .select("id,status")
@@ -198,7 +198,7 @@ export async function handleBookExport(bookId: string, rawFormat: string, jobId?
       if (exportFormat === "pdf") {
         body = new Uint8Array(await renderBookPdf(book, async (progress, message) => {
           const phase: ProgressPhase = progress >= 90 ? "merging" : "rendering";
-          await updateProgress(supabase, activeJobId!, progress, phase, message);
+          await updateProgress(supabase, activeJobId, progress, phase, message);
         }));
       } else if (exportFormat === "epub") {
         await updateProgress(supabase, activeJobId, 35, "rendering", "EPUB 파일을 만들고 있습니다.");
