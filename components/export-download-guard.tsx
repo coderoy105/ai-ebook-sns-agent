@@ -11,10 +11,13 @@ type DownloadState = {
 } | null;
 
 type ExportStatus = {
+  jobId?: string;
   status?: string;
   progress?: number;
   phase?: string;
   message?: string;
+  background?: boolean;
+  ready?: boolean;
 };
 
 function exportInfo(href: string) {
@@ -121,11 +124,12 @@ export function ExportDownloadGuard() {
       if (busyRef.current) return;
       busyRef.current = true;
       anchor.setAttribute("aria-busy", "true");
-      setState({ format, phase: "preparing", progress: 1, message: `${format} 1% · 생성 작업을 준비하고 있습니다.` });
-
-      let pollActive = true;
-      let pollError: string | null = null;
-      const controller = new AbortController();
+      setState({
+        format,
+        phase: "preparing",
+        progress: 1,
+        message: `${format} 1% · 백그라운드 작업을 준비하고 있습니다. 앱을 닫아도 계속 진행됩니다.`
+      });
 
       try {
         const startResponse = await fetch(url.toString(), {
@@ -134,7 +138,7 @@ export function ExportDownloadGuard() {
           cache: "no-store"
         });
         if (!startResponse.ok) throw new Error(await responseError(startResponse));
-        const started = await startResponse.json() as { jobId?: string };
+        const started = await startResponse.json() as { jobId?: string; status?: string; background?: boolean };
         if (!started.jobId) throw new Error("다운로드 작업 ID를 만들지 못했습니다.");
         const jobId = started.jobId;
 
@@ -143,47 +147,33 @@ export function ExportDownloadGuard() {
         const downloadUrl = new URL(url.toString());
         downloadUrl.searchParams.set("jobId", jobId);
 
-        const polling = (async () => {
-          while (pollActive) {
-            try {
-              const response = await fetch(statusUrl.toString(), {
-                credentials: "same-origin",
-                cache: "no-store"
-              });
-              if (response.ok) {
-                const payload = await response.json() as ExportStatus;
-                if (payload.status === "FAILED") {
-                  pollError = payload.message || `${format} 생성에 실패했습니다.`;
-                  controller.abort();
-                  return;
-                }
-                if (typeof payload.progress === "number") {
-                  const progress = Math.max(1, Math.min(90, Math.round(payload.progress)));
-                  setState({
-                    format,
-                    phase: "generating",
-                    progress,
-                    message: `${format} ${progress}% · ${payload.message || "파일을 만들고 있습니다."}`
-                  });
-                }
-              }
-            } catch {
-              // A single status poll can fail while the export request itself is healthy.
-            }
-            await sleep(700);
-          }
-        })();
+        while (true) {
+          const response = await fetch(statusUrl.toString(), {
+            credentials: "same-origin",
+            cache: "no-store"
+          });
+          if (!response.ok) throw new Error(await responseError(response));
+          const payload = await response.json() as ExportStatus;
+          if (payload.status === "FAILED") throw new Error(payload.message || `${format} 생성에 실패했습니다.`);
+
+          const progress = Math.max(1, Math.min(90, Math.round(payload.progress ?? 2)));
+          setState({
+            format,
+            phase: "generating",
+            progress,
+            message: `${format} ${progress}% · ${payload.message || "백그라운드에서 파일을 만들고 있습니다. 앱을 닫아도 계속 진행됩니다."}`
+          });
+
+          if (payload.status === "COMPLETED" && payload.ready !== false) break;
+          await sleep(document.visibilityState === "hidden" ? 2500 : 700);
+        }
 
         const response = await fetch(downloadUrl.toString(), {
           method: "GET",
           credentials: "same-origin",
           cache: "no-store",
-          signal: controller.signal,
           headers: { accept: format === "PDF" ? "application/pdf" : "*/*" }
         });
-        pollActive = false;
-        await polling;
-        if (pollError) throw new Error(pollError);
         if (!response.ok) throw new Error(await responseError(response));
 
         const total = Number(response.headers.get("content-length") ?? 0);
@@ -192,8 +182,8 @@ export function ExportDownloadGuard() {
           phase: "downloading",
           progress: 90,
           message: total > 0
-            ? `${format} 90% · 다운로드 시작 · 0 B / ${formatBytes(total)}`
-            : `${format} 90% · 다운로드를 시작합니다.`
+            ? `${format} 90% · 완성 파일 다운로드 시작 · 0 B / ${formatBytes(total)}`
+            : `${format} 90% · 완성 파일 다운로드를 시작합니다.`
         });
 
         const blob = await readResponseWithProgress(response, format, (received, expected, transferPercent) => {
@@ -222,12 +212,10 @@ export function ExportDownloadGuard() {
         setState({ format, phase: "done", progress: 100, message: `${format} 100% · 파일 저장을 시작했습니다.` });
         scheduleClear(3600);
       } catch (error) {
-        pollActive = false;
-        const message = pollError || (error instanceof Error ? error.message : "파일 다운로드에 실패했습니다.");
+        const message = error instanceof Error ? error.message : "파일 다운로드에 실패했습니다.";
         setState({ format, phase: "error", progress: 0, message });
         scheduleClear(8000);
       } finally {
-        controller.abort();
         anchor.removeAttribute("aria-busy");
         busyRef.current = false;
       }
