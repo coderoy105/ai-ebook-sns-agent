@@ -3,9 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import styles from "./export-download-guard.module.css";
 
+type DownloadPhase = "preparing" | "generating" | "ready" | "downloading" | "done" | "error";
 type DownloadState = {
   format: string;
-  phase: "preparing" | "generating" | "downloading" | "done" | "error";
+  phase: DownloadPhase;
   message: string;
   progress: number;
 } | null;
@@ -18,6 +19,13 @@ type ExportStatus = {
   message?: string;
   background?: boolean;
   ready?: boolean;
+  stale?: boolean;
+  updatedAt?: string | null;
+};
+
+type ExportTarget = {
+  url: URL;
+  format: string;
 };
 
 function exportInfo(href: string) {
@@ -56,7 +64,10 @@ function sleep(ms: number) {
 async function responseError(response: Response) {
   try {
     const payload = await response.json() as { error?: unknown };
-    if (typeof payload.error === "string" && payload.error.trim()) return payload.error;
+    if (typeof payload.error === "string" && payload.error.trim()) {
+      if (payload.error === "EXPORT_NOT_READY") return "PDF는 백그라운드에서 계속 생성 중입니다.";
+      return payload.error;
+    }
   } catch { /* response may not be JSON */ }
   return `다운로드 준비에 실패했습니다. (HTTP ${response.status})`;
 }
@@ -109,133 +120,254 @@ async function readResponseWithProgress(
   });
 }
 
+function statusUrlFor(target: ExportTarget, jobId?: string | null) {
+  const url = new URL(`${target.url.pathname}/status`, target.url.origin);
+  if (jobId) url.searchParams.set("jobId", jobId);
+  return url;
+}
+
+function downloadUrlFor(target: ExportTarget, jobId: string) {
+  const url = new URL(target.url.toString());
+  url.searchParams.set("jobId", jobId);
+  return url;
+}
+
 export function ExportDownloadGuard() {
   const [state, setState] = useState<DownloadState>(null);
   const busyRef = useRef(false);
+  const monitorTokenRef = useRef(0);
   const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    let disposed = false;
+
     function scheduleClear(delay: number) {
       if (clearTimerRef.current) clearTimeout(clearTimerRef.current);
       clearTimerRef.current = setTimeout(() => setState(null), delay);
     }
 
-    async function run(anchor: HTMLAnchorElement, format: string, url: URL) {
+    function renderStatus(format: string, payload: ExportStatus) {
+      const progress = Math.max(1, Math.min(90, Math.round(payload.progress ?? 2)));
+      setState({
+        format,
+        phase: payload.status === "COMPLETED" ? "ready" : "generating",
+        progress,
+        message: payload.status === "COMPLETED"
+          ? `${format} 90% · 백그라운드 생성 완료 · ${format} 버튼을 누르면 바로 다운로드됩니다.`
+          : `${format} ${progress}% · ${payload.message || "백그라운드에서 파일을 만들고 있습니다. 앱을 닫아도 계속 진행됩니다."}`
+      });
+    }
+
+    async function fetchStatus(target: ExportTarget, jobId?: string | null) {
+      const response = await fetch(statusUrlFor(target, jobId).toString(), {
+        credentials: "same-origin",
+        cache: "no-store"
+      });
+      if (response.status === 404) return null;
+      if (!response.ok) throw new Error(await responseError(response));
+      return response.json() as Promise<ExportStatus>;
+    }
+
+    async function startOrReuse(target: ExportTarget) {
+      const response = await fetch(target.url.toString(), {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store"
+      });
+      if (!response.ok) throw new Error(await responseError(response));
+      const payload = await response.json() as ExportStatus;
+      if (!payload.jobId) throw new Error("다운로드 작업 ID를 만들지 못했습니다.");
+      return payload;
+    }
+
+    async function downloadReadyArtifact(target: ExportTarget, jobId: string, token: number) {
+      const response = await fetch(downloadUrlFor(target, jobId).toString(), {
+        method: "GET",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { accept: target.format === "PDF" ? "application/pdf" : "*/*" }
+      });
+      if (!response.ok) throw new Error(await responseError(response));
+      if (disposed || monitorTokenRef.current !== token) return;
+
+      const total = Number(response.headers.get("content-length") ?? 0);
+      setState({
+        format: target.format,
+        phase: "downloading",
+        progress: 90,
+        message: total > 0
+          ? `${target.format} 90% · 완성 파일 다운로드 시작 · 0 B / ${formatBytes(total)}`
+          : `${target.format} 90% · 완성 파일 다운로드를 시작합니다.`
+      });
+
+      const blob = await readResponseWithProgress(response, target.format, (received, expected, transferPercent) => {
+        if (disposed || monitorTokenRef.current !== token) return;
+        const overall = transferPercent >= 100 ? 100 : Math.min(99, 90 + Math.floor(transferPercent / 10));
+        setState({
+          format: target.format,
+          phase: "downloading",
+          progress: overall,
+          message: expected > 0
+            ? `${target.format} ${overall}% · 다운로드 ${transferPercent}% · ${formatBytes(received)} / ${formatBytes(expected)}`
+            : `${target.format} ${overall}% · 다운로드 중 · ${formatBytes(received)}`
+        });
+      });
+
+      if (disposed || monitorTokenRef.current !== token) return;
+      const blobUrl = URL.createObjectURL(blob);
+      const download = document.createElement("a");
+      download.href = blobUrl;
+      download.download = downloadFilename(response, target.format);
+      download.rel = "noopener";
+      download.style.display = "none";
+      document.body.appendChild(download);
+      download.click();
+      download.remove();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 15_000);
+
+      setState({
+        format: target.format,
+        phase: "done",
+        progress: 100,
+        message: `${target.format} 100% · 파일 저장을 시작했습니다.`
+      });
+      scheduleClear(3600);
+    }
+
+    async function monitor(target: ExportTarget, jobId: string, autoDownload: boolean, token: number) {
+      while (!disposed && monitorTokenRef.current === token) {
+        if (document.visibilityState === "hidden") {
+          await sleep(3000);
+          continue;
+        }
+
+        const payload = await fetchStatus(target, jobId);
+        if (!payload) throw new Error("백그라운드 다운로드 작업을 찾지 못했습니다.");
+        if (payload.status === "FAILED") throw new Error(payload.message || `${target.format} 생성에 실패했습니다.`);
+        if (payload.stale) {
+          setState({
+            format: target.format,
+            phase: "preparing",
+            progress: 1,
+            message: `${target.format} · 중단된 이전 작업을 자동으로 복구하고 있습니다.`
+          });
+          const restarted = await startOrReuse(target);
+          if (!restarted.jobId) throw new Error("백그라운드 작업 복구에 실패했습니다.");
+          jobId = restarted.jobId;
+          continue;
+        }
+
+        renderStatus(target.format, payload);
+        if (payload.status === "COMPLETED" && payload.ready !== false) {
+          if (autoDownload) await downloadReadyArtifact(target, jobId, token);
+          return;
+        }
+        await sleep(900);
+      }
+    }
+
+    async function run(anchor: HTMLAnchorElement, target: ExportTarget) {
       if (busyRef.current) return;
       busyRef.current = true;
       anchor.setAttribute("aria-busy", "true");
+      const token = monitorTokenRef.current + 1;
+      monitorTokenRef.current = token;
       setState({
-        format,
+        format: target.format,
         phase: "preparing",
         progress: 1,
-        message: `${format} 1% · 백그라운드 작업을 준비하고 있습니다. 앱을 닫아도 계속 진행됩니다.`
+        message: `${target.format} 1% · 백그라운드 작업을 확인하고 있습니다. 앱을 닫아도 계속 진행됩니다.`
       });
 
       try {
-        const startResponse = await fetch(url.toString(), {
-          method: "POST",
-          credentials: "same-origin",
-          cache: "no-store"
-        });
-        if (!startResponse.ok) throw new Error(await responseError(startResponse));
-        const started = await startResponse.json() as { jobId?: string; status?: string; background?: boolean };
-        if (!started.jobId) throw new Error("다운로드 작업 ID를 만들지 못했습니다.");
-        const jobId = started.jobId;
-
-        const statusUrl = new URL(`${url.pathname}/status`, url.origin);
-        statusUrl.searchParams.set("jobId", jobId);
-        const downloadUrl = new URL(url.toString());
-        downloadUrl.searchParams.set("jobId", jobId);
-
-        while (true) {
-          const response = await fetch(statusUrl.toString(), {
-            credentials: "same-origin",
-            cache: "no-store"
-          });
-          if (!response.ok) throw new Error(await responseError(response));
-          const payload = await response.json() as ExportStatus;
-          if (payload.status === "FAILED") throw new Error(payload.message || `${format} 생성에 실패했습니다.`);
-
-          const progress = Math.max(1, Math.min(90, Math.round(payload.progress ?? 2)));
-          setState({
-            format,
-            phase: "generating",
-            progress,
-            message: `${format} ${progress}% · ${payload.message || "백그라운드에서 파일을 만들고 있습니다. 앱을 닫아도 계속 진행됩니다."}`
-          });
-
-          if (payload.status === "COMPLETED" && payload.ready !== false) break;
-          await sleep(document.visibilityState === "hidden" ? 2500 : 700);
+        const started = await startOrReuse(target);
+        if (started.status === "COMPLETED" && started.ready !== false) {
+          await downloadReadyArtifact(target, started.jobId!, token);
+        } else {
+          await monitor(target, started.jobId!, true, token);
         }
-
-        const response = await fetch(downloadUrl.toString(), {
-          method: "GET",
-          credentials: "same-origin",
-          cache: "no-store",
-          headers: { accept: format === "PDF" ? "application/pdf" : "*/*" }
-        });
-        if (!response.ok) throw new Error(await responseError(response));
-
-        const total = Number(response.headers.get("content-length") ?? 0);
-        setState({
-          format,
-          phase: "downloading",
-          progress: 90,
-          message: total > 0
-            ? `${format} 90% · 완성 파일 다운로드 시작 · 0 B / ${formatBytes(total)}`
-            : `${format} 90% · 완성 파일 다운로드를 시작합니다.`
-        });
-
-        const blob = await readResponseWithProgress(response, format, (received, expected, transferPercent) => {
-          const overall = transferPercent >= 100 ? 100 : Math.min(99, 90 + Math.floor(transferPercent / 10));
-          setState({
-            format,
-            phase: "downloading",
-            progress: overall,
-            message: expected > 0
-              ? `${format} ${overall}% · 다운로드 ${transferPercent}% · ${formatBytes(received)} / ${formatBytes(expected)}`
-              : `${format} ${overall}% · 다운로드 중 · ${formatBytes(received)}`
-          });
-        });
-
-        const blobUrl = URL.createObjectURL(blob);
-        const download = document.createElement("a");
-        download.href = blobUrl;
-        download.download = downloadFilename(response, format);
-        download.rel = "noopener";
-        download.style.display = "none";
-        document.body.appendChild(download);
-        download.click();
-        download.remove();
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 15_000);
-
-        setState({ format, phase: "done", progress: 100, message: `${format} 100% · 파일 저장을 시작했습니다.` });
-        scheduleClear(3600);
       } catch (error) {
-        const message = error instanceof Error ? error.message : "파일 다운로드에 실패했습니다.";
-        setState({ format, phase: "error", progress: 0, message });
-        scheduleClear(8000);
+        if (!disposed && monitorTokenRef.current === token) {
+          const message = error instanceof Error ? error.message : "파일 다운로드에 실패했습니다.";
+          setState({ format: target.format, phase: "error", progress: 0, message });
+          scheduleClear(8000);
+        }
       } finally {
         anchor.removeAttribute("aria-busy");
         busyRef.current = false;
       }
     }
 
+    async function restoreBackgroundJob() {
+      await sleep(0);
+      const links = Array.from(document.querySelectorAll("a.export-link"))
+        .filter((node): node is HTMLAnchorElement => node instanceof HTMLAnchorElement)
+        .map((anchor) => exportInfo(anchor.href))
+        .filter((value): value is ExportTarget => Boolean(value));
+      if (!links.length || disposed) return;
+
+      const params = new URLSearchParams(window.location.search);
+      const preferredFormat = params.get("export")?.toUpperCase() ?? null;
+      const preferredJobId = params.get("jobId");
+      links.sort((a, b) => {
+        if (a.format === preferredFormat) return -1;
+        if (b.format === preferredFormat) return 1;
+        if (a.format === "PDF") return -1;
+        if (b.format === "PDF") return 1;
+        return 0;
+      });
+
+      for (const target of links) {
+        try {
+          const explicitJobId = target.format === preferredFormat ? preferredJobId : null;
+          const payload = await fetchStatus(target, explicitJobId);
+          if (!payload?.jobId) continue;
+          if (payload.status !== "QUEUED" && payload.status !== "RUNNING") continue;
+
+          const token = monitorTokenRef.current + 1;
+          monitorTokenRef.current = token;
+          renderStatus(target.format, payload);
+          void monitor(target, payload.jobId, false, token).catch((error) => {
+            if (disposed || monitorTokenRef.current !== token) return;
+            setState({
+              format: target.format,
+              phase: "error",
+              progress: 0,
+              message: error instanceof Error ? error.message : `${target.format} 백그라운드 작업 확인에 실패했습니다.`
+            });
+          });
+
+          if (preferredFormat) {
+            const clean = new URL(window.location.href);
+            clean.searchParams.delete("export");
+            clean.searchParams.delete("jobId");
+            window.history.replaceState(null, "", `${clean.pathname}${clean.search}${clean.hash}`);
+          }
+          return;
+        } catch {
+          // Try the next format. A failed discovery must not break the editor.
+        }
+      }
+    }
+
     function onClick(event: MouseEvent) {
       if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-      const target = event.target;
-      if (!(target instanceof Element)) return;
-      const anchor = target.closest("a.export-link");
+      const targetNode = event.target;
+      if (!(targetNode instanceof Element)) return;
+      const anchor = targetNode.closest("a.export-link");
       if (!(anchor instanceof HTMLAnchorElement)) return;
       const info = exportInfo(anchor.href);
       if (!info) return;
       event.preventDefault();
-      void run(anchor, info.format, info.url);
+      void run(anchor, info);
     }
 
-    document.addEventListener("click", onClick);
+    document.addEventListener("click", onClick, true);
+    void restoreBackgroundJob();
     return () => {
-      document.removeEventListener("click", onClick);
+      disposed = true;
+      monitorTokenRef.current += 1;
+      document.removeEventListener("click", onClick, true);
       if (clearTimerRef.current) clearTimeout(clearTimerRef.current);
     };
   }, []);
