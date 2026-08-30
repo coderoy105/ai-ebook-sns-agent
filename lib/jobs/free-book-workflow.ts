@@ -5,10 +5,13 @@ import {
   generateBackgroundStructured,
   type BackgroundAiProvider
 } from "@/lib/ai/background-provider";
+import { isTransientCodexError } from "@/lib/ai/transient-codex-errors";
 import { sectionDraftJsonSchema } from "@/lib/ai/json-schemas";
 import { SectionDraftSchema } from "@/lib/ai/schemas";
 import { sectionWriterPrompt, sectionWriterSystem } from "@/lib/ai/prompts";
 import { composeBookPages } from "@/lib/design/compose";
+
+const MAX_TRANSIENT_CODEX_RETRIES = 3;
 
 type WorkflowInput = { bookId: string; userId: string; jobId: string; provider: BackgroundAiProvider };
 type Relation<T> = T | T[] | null;
@@ -76,6 +79,12 @@ function outlinePosition(row: OutlineRow) {
   return [part?.position ?? 0, chapter?.position ?? 0, row.position] as const;
 }
 
+function retryDelay(attempt: number) {
+  if (attempt <= 1) return "5s";
+  if (attempt === 2) return "15s";
+  return "30s";
+}
+
 export async function generateFreeBookWorkflow(input: WorkflowInput) {
   "use workflow";
 
@@ -91,6 +100,7 @@ export async function generateFreeBookWorkflow(input: WorkflowInput) {
       if (section.status === "COMPLETED") continue;
 
       let sectionFinished = false;
+      let transientRetries = 0;
       while (!sectionFinished) {
         let control = await bookStep({ action: "control", input }) as { kind: "control"; state: string };
         let state = control.state;
@@ -132,6 +142,19 @@ export async function generateFreeBookWorkflow(input: WorkflowInput) {
         if (result.kind === "connection-expired") {
           await bookStep({ action: "reconnect", input, progress: progressFrom(index, total) });
           return { status: "needs-reconnect" };
+        }
+
+        if (input.provider === "codex" && isTransientCodexError(result.message) && transientRetries < MAX_TRANSIENT_CODEX_RETRIES) {
+          transientRetries += 1;
+          await bookStep({
+            action: "mark",
+            input,
+            status: "GENERATING",
+            message: `Codex 응답이 일시적으로 지연되어 현재 Section을 자동 재시도합니다. (${transientRetries}/${MAX_TRANSIENT_CODEX_RETRIES})`,
+            progress: progressFrom(index, total)
+          });
+          await workflowWait(retryDelay(transientRetries));
+          continue;
         }
 
         await bookStep({ action: "temporary-failure", input, message: result.message, progress: progressFrom(index, total) });
@@ -303,7 +326,7 @@ async function generateSection(input: WorkflowInput, sectionId: string): Promise
 async function markJob(jobId: string, status: string, message: string, progress: number) {
   const supabase = createServiceSupabase();
   await Promise.all([
-    supabase.from("generation_jobs").update({ status, progress, updated_at: new Date().toISOString() }).eq("id", jobId),
+    supabase.from("generation_jobs").update({ status, progress, failure_reason: null, updated_at: new Date().toISOString() }).eq("id", jobId),
     supabase.from("job_logs").insert({ generation_job_id: jobId, level: status === "WAITING_LIMIT" ? "warning" : "info", message })
   ]);
 }
@@ -322,7 +345,7 @@ async function markSectionProgress(
     : `이미 완료된 Section ${ordinal}/${total}을 건너뜁니다.`;
   await Promise.all([
     supabase.from("books").update({ status: "GENERATING", progress, current_section_id: sectionId }).eq("id", input.bookId),
-    supabase.from("generation_jobs").update({ status: "GENERATING", progress, updated_at: new Date().toISOString() }).eq("id", input.jobId),
+    supabase.from("generation_jobs").update({ status: "GENERATING", progress, failure_reason: null, updated_at: new Date().toISOString() }).eq("id", input.jobId),
     supabase.from("job_logs").insert({
       generation_job_id: input.jobId,
       level: "info",
@@ -336,7 +359,7 @@ async function markNeedsReconnect(input: WorkflowInput, progress: number) {
   const supabase = createServiceSupabase();
   await Promise.all([
     supabase.from("books").update({ status: "PAUSED" }).eq("id", input.bookId),
-    supabase.from("generation_jobs").update({ status: "NEEDS_RECONNECT", progress, updated_at: new Date().toISOString() }).eq("id", input.jobId),
+    supabase.from("generation_jobs").update({ status: "NEEDS_RECONNECT", progress, failure_reason: "CODEX_CONNECTION_REQUIRED", updated_at: new Date().toISOString() }).eq("id", input.jobId),
     supabase.from("job_logs").insert({ generation_job_id: input.jobId, level: "warning", message: `${backgroundProviderLabel(input.provider)} 연결이 만료되었습니다. 다시 연결하면 저장된 위치에서 이어서 생성할 수 있습니다.` })
   ]);
 }
@@ -345,7 +368,7 @@ async function markTemporaryFailure(input: WorkflowInput, message: string, progr
   const supabase = createServiceSupabase();
   await Promise.all([
     supabase.from("books").update({ status: "PAUSED" }).eq("id", input.bookId),
-    supabase.from("generation_jobs").update({ status: "PAUSED_ERROR", progress, updated_at: new Date().toISOString() }).eq("id", input.jobId),
+    supabase.from("generation_jobs").update({ status: "PAUSED_ERROR", progress, failure_reason: message, updated_at: new Date().toISOString() }).eq("id", input.jobId),
     supabase.from("job_logs").insert({ generation_job_id: input.jobId, level: "warning", message: `${backgroundProviderLabel(input.provider)} 제공자 오류로 일시정지: ${message}` })
   ]);
 }
@@ -354,7 +377,7 @@ async function finalizeBook(input: WorkflowInput, pageCount: number) {
   const supabase = createServiceSupabase();
   await Promise.all([
     supabase.from("books").update({ status: "COMPLETED", progress: 100, current_section_id: null }).eq("id", input.bookId),
-    supabase.from("generation_jobs").update({ status: "COMPLETED", progress: 100, finished_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", input.jobId),
+    supabase.from("generation_jobs").update({ status: "COMPLETED", progress: 100, failure_reason: null, finished_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", input.jobId),
     supabase.from("job_logs").insert({ generation_job_id: input.jobId, level: "info", message: `${backgroundProviderLabel(input.provider)} 백그라운드 책 완성 · ${pageCount} pages composed` })
   ]);
 }
@@ -363,7 +386,7 @@ async function failWorkflow(input: WorkflowInput, message: string) {
   const supabase = createServiceSupabase();
   await Promise.all([
     supabase.from("books").update({ status: "PAUSED" }).eq("id", input.bookId),
-    supabase.from("generation_jobs").update({ status: "FAILED", updated_at: new Date().toISOString() }).eq("id", input.jobId),
+    supabase.from("generation_jobs").update({ status: "FAILED", failure_reason: message, updated_at: new Date().toISOString() }).eq("id", input.jobId),
     supabase.from("job_logs").insert({ generation_job_id: input.jobId, level: "error", message: `${backgroundProviderLabel(input.provider)} 백그라운드 생성 실패: ${message}` })
   ]);
 }
