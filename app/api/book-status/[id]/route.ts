@@ -12,6 +12,11 @@ export const maxDuration = 300;
 
 const STALE_PLANNING_MS = 3 * 60 * 1000;
 const ACTIVE_PLANNING_STATUSES = ["QUEUED", "PLANNING", "RETRYING", "WAITING_LIMIT"];
+const RECOVERABLE_PLANNING_FAILURES = new Set([
+  "WORKER_ERROR",
+  "CODEX_OUTPUT_SCHEMA_INVALID",
+  "CODEX_GENERATION_FAILED"
+]);
 
 const PlanningInputSchema = z.object({
   idea: z.string().min(8).max(8000),
@@ -42,6 +47,7 @@ type JobRow = {
   status: string;
   progress: number | null;
   workflow_run_id: string | null;
+  failure_reason: string | null;
   created_at: string;
   updated_at: string | null;
 };
@@ -55,6 +61,20 @@ function activityAgeMs(job: JobRow) {
   return Number.isFinite(timestamp) ? Date.now() - timestamp : 0;
 }
 
+function isRecoverablePlanningJob(bookStatus: string, job: JobRow) {
+  const stale = activityAgeMs(job) >= STALE_PLANNING_MS;
+  const activeStale = bookStatus === "PLANNING"
+    && ACTIVE_PLANNING_STATUSES.includes(job.status)
+    && Number(job.progress ?? 0) <= 8
+    && stale;
+  const knownTechnicalFailure = bookStatus === "FAILED"
+    && job.status === "PAUSED_ERROR"
+    && Number(job.progress ?? 0) <= 12
+    && RECOVERABLE_PLANNING_FAILURES.has(job.failure_reason ?? "")
+    && stale;
+  return activeStale || knownTechnicalFailure;
+}
+
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id: bookId } = await params;
@@ -66,7 +86,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
         .eq("id", bookId)
         .single(),
       supabase.from("generation_jobs")
-        .select("id,status,progress,workflow_run_id,created_at,updated_at")
+        .select("id,status,progress,workflow_run_id,failure_reason,created_at,updated_at")
         .eq("book_id", bookId)
         .order("created_at", { ascending: false })
         .limit(1),
@@ -92,27 +112,26 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     let bookStatus = String(book.status ?? "DRAFT");
     let recovery: { state: string; runId?: string; error?: string } | null = null;
 
-    const shouldRecover = bookStatus === "PLANNING"
-      && latestJob !== null
-      && ACTIVE_PLANNING_STATUSES.includes(latestJob.status)
-      && Number(latestJob.progress ?? 0) <= 8
-      && activityAgeMs(latestJob) >= STALE_PLANNING_MS
-      && planningInput.success;
+    const shouldRecover = latestJob !== null
+      && planningInput.success
+      && isRecoverablePlanningJob(bookStatus, latestJob);
 
     if (shouldRecover && latestJob) {
       const credentialReady = await hasBackgroundCredential(user.id, provider);
       if (!credentialReady) {
+        const now = new Date().toISOString();
         await supabase.from("generation_jobs").update({
           status: "NEEDS_RECONNECT",
-          updated_at: new Date().toISOString()
+          updated_at: now
         }).eq("id", latestJob.id);
-        latestJob = { ...latestJob, status: "NEEDS_RECONNECT", updated_at: new Date().toISOString() };
+        latestJob = { ...latestJob, status: "NEEDS_RECONNECT", updated_at: now };
         recovery = { state: "needs-reconnect" };
       } else {
         const previousRunId = latestJob.workflow_run_id;
         let claim = supabase.from("generation_jobs").update({
           status: "RETRYING",
           workflow_run_id: null,
+          failure_reason: null,
           updated_at: new Date().toISOString()
         }).eq("id", latestJob.id).eq("status", latestJob.status);
         claim = previousRunId
@@ -135,6 +154,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
                 workflow_run_id: run.runId,
                 status: "PLANNING",
                 progress: 8,
+                failure_reason: null,
                 started_at: now,
                 updated_at: now
               }).eq("id", latestJob.id),
@@ -145,7 +165,15 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
                 message: "중단된 Book Blueprint 작업을 감지해 최신 Workflow에서 자동 복구했습니다."
               })
             ]);
-            latestJob = { ...latestJob, status: "PLANNING", progress: 8, workflow_run_id: run.runId, created_at: latestJob.created_at, updated_at: now };
+            latestJob = {
+              ...latestJob,
+              status: "PLANNING",
+              progress: 8,
+              workflow_run_id: run.runId,
+              failure_reason: null,
+              updated_at: now
+            };
+            bookStatus = "PLANNING";
             recovery = { state: "recovered", runId: run.runId };
           } catch (caught) {
             const message = caught instanceof Error ? caught.message : "PLANNING_RECOVERY_FAILED";
@@ -155,7 +183,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
               supabase.from("books").update({ status: "FAILED", updated_at: now }).eq("id", bookId),
               supabase.from("job_logs").insert({ generation_job_id: latestJob.id, level: "error", message: `Book Blueprint 자동 복구 실패: ${message}` })
             ]);
-            latestJob = { ...latestJob, status: "PAUSED_ERROR", workflow_run_id: null, updated_at: now };
+            latestJob = { ...latestJob, status: "PAUSED_ERROR", failure_reason: message, workflow_run_id: null, updated_at: now };
             bookStatus = "FAILED";
             recovery = { state: "failed", error: message };
           }
