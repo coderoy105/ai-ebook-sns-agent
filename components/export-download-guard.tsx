@@ -5,10 +5,17 @@ import styles from "./export-download-guard.module.css";
 
 type DownloadState = {
   format: string;
-  phase: "preparing" | "downloading" | "done" | "error";
+  phase: "preparing" | "generating" | "downloading" | "done" | "error";
   message: string;
   progress: number;
 } | null;
+
+type ExportStatus = {
+  status?: string;
+  progress?: number;
+  phase?: string;
+  message?: string;
+};
 
 function exportInfo(href: string) {
   try {
@@ -37,6 +44,10 @@ function formatBytes(value: number) {
   if (kb < 1024) return `${kb.toFixed(kb >= 100 ? 0 : 1)} KB`;
   const mb = kb / 1024;
   return `${mb.toFixed(mb >= 100 ? 0 : 1)} MB`;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function responseError(response: Response) {
@@ -110,33 +121,90 @@ export function ExportDownloadGuard() {
       if (busyRef.current) return;
       busyRef.current = true;
       anchor.setAttribute("aria-busy", "true");
-      setState({ format, phase: "preparing", progress: 0, message: `${format} 생성 중 · 다운로드 0%` });
+      setState({ format, phase: "preparing", progress: 1, message: `${format} 1% · 생성 작업을 준비하고 있습니다.` });
+
+      let pollActive = true;
+      let pollError: string | null = null;
+      const controller = new AbortController();
 
       try {
-        const response = await fetch(url.toString(), {
+        const startResponse = await fetch(url.toString(), {
+          method: "POST",
+          credentials: "same-origin",
+          cache: "no-store"
+        });
+        if (!startResponse.ok) throw new Error(await responseError(startResponse));
+        const started = await startResponse.json() as { jobId?: string };
+        if (!started.jobId) throw new Error("다운로드 작업 ID를 만들지 못했습니다.");
+        const jobId = started.jobId;
+
+        const statusUrl = new URL(`${url.pathname}/status`, url.origin);
+        statusUrl.searchParams.set("jobId", jobId);
+        const downloadUrl = new URL(url.toString());
+        downloadUrl.searchParams.set("jobId", jobId);
+
+        const polling = (async () => {
+          while (pollActive) {
+            try {
+              const response = await fetch(statusUrl.toString(), {
+                credentials: "same-origin",
+                cache: "no-store"
+              });
+              if (response.ok) {
+                const payload = await response.json() as ExportStatus;
+                if (payload.status === "FAILED") {
+                  pollError = payload.message || `${format} 생성에 실패했습니다.`;
+                  controller.abort();
+                  return;
+                }
+                if (typeof payload.progress === "number") {
+                  const progress = Math.max(1, Math.min(90, Math.round(payload.progress)));
+                  setState({
+                    format,
+                    phase: "generating",
+                    progress,
+                    message: `${format} ${progress}% · ${payload.message || "파일을 만들고 있습니다."}`
+                  });
+                }
+              }
+            } catch {
+              // A single status poll can fail while the export request itself is healthy.
+            }
+            await sleep(700);
+          }
+        })();
+
+        const response = await fetch(downloadUrl.toString(), {
           method: "GET",
           credentials: "same-origin",
           cache: "no-store",
+          signal: controller.signal,
           headers: { accept: format === "PDF" ? "application/pdf" : "*/*" }
         });
+        pollActive = false;
+        await polling;
+        if (pollError) throw new Error(pollError);
         if (!response.ok) throw new Error(await responseError(response));
 
         const total = Number(response.headers.get("content-length") ?? 0);
         setState({
           format,
           phase: "downloading",
-          progress: 0,
-          message: total > 0 ? `${format} 다운로드 0% · 0 B / ${formatBytes(total)}` : `${format} 다운로드 시작 · 0%`
+          progress: 90,
+          message: total > 0
+            ? `${format} 90% · 다운로드 시작 · 0 B / ${formatBytes(total)}`
+            : `${format} 90% · 다운로드를 시작합니다.`
         });
 
-        const blob = await readResponseWithProgress(response, format, (received, expected, percent) => {
+        const blob = await readResponseWithProgress(response, format, (received, expected, transferPercent) => {
+          const overall = transferPercent >= 100 ? 100 : Math.min(99, 90 + Math.floor(transferPercent / 10));
           setState({
             format,
             phase: "downloading",
-            progress: percent,
+            progress: overall,
             message: expected > 0
-              ? `${format} 다운로드 ${percent}% · ${formatBytes(received)} / ${formatBytes(expected)}`
-              : `${format} 다운로드 ${percent}% · ${formatBytes(received)}`
+              ? `${format} ${overall}% · 다운로드 ${transferPercent}% · ${formatBytes(received)} / ${formatBytes(expected)}`
+              : `${format} ${overall}% · 다운로드 중 · ${formatBytes(received)}`
           });
         });
 
@@ -151,13 +219,15 @@ export function ExportDownloadGuard() {
         download.remove();
         setTimeout(() => URL.revokeObjectURL(blobUrl), 15_000);
 
-        setState({ format, phase: "done", progress: 100, message: `${format} 다운로드 100% · 저장을 시작했습니다.` });
-        scheduleClear(3200);
+        setState({ format, phase: "done", progress: 100, message: `${format} 100% · 파일 저장을 시작했습니다.` });
+        scheduleClear(3600);
       } catch (error) {
-        const message = error instanceof Error ? error.message : "파일 다운로드에 실패했습니다.";
+        pollActive = false;
+        const message = pollError || (error instanceof Error ? error.message : "파일 다운로드에 실패했습니다.");
         setState({ format, phase: "error", progress: 0, message });
         scheduleClear(8000);
       } finally {
+        controller.abort();
         anchor.removeAttribute("aria-busy");
         busyRef.current = false;
       }
@@ -195,7 +265,7 @@ export function ExportDownloadGuard() {
         <div
           className={styles.progressTrack}
           role="progressbar"
-          aria-label={`${state.format} 다운로드 진행률`}
+          aria-label={`${state.format} 파일 준비 진행률`}
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={state.progress}
