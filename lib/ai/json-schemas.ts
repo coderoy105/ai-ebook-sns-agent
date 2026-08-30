@@ -36,6 +36,22 @@ const chapterSkeletonJsonSchema = {
   }
 } as const;
 
+// OpenAI/Codex Structured Outputs requires object shapes to be explicit. Arbitrary
+// JSON hashes (additionalProperties: true) are rejected by the strict schema path.
+// Both containers therefore use the same compact, fixed shape. The irrelevant
+// container for a genre can simply use an empty summary/arrays.
+const compactBlueprintMemoryJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["summary", "facts", "entities", "constraints"],
+  properties: {
+    summary: { type: "string" },
+    facts: { type: "array", maxItems: 24, items: { type: "string" } },
+    entities: { type: "array", maxItems: 24, items: { type: "string" } },
+    constraints: { type: "array", maxItems: 24, items: { type: "string" } }
+  }
+} as const;
+
 export const bookBlueprintSkeletonJsonSchema = {
   type: "object",
   additionalProperties: false,
@@ -68,8 +84,8 @@ export const bookBlueprintSkeletonJsonSchema = {
         }
       }
     },
-    storyBible: { anyOf: [{ type: "object", additionalProperties: true }, { type: "null" }] },
-    knowledgeMap: { anyOf: [{ type: "object", additionalProperties: true }, { type: "null" }] }
+    storyBible: compactBlueprintMemoryJsonSchema,
+    knowledgeMap: compactBlueprintMemoryJsonSchema
   }
 } as const;
 
@@ -142,7 +158,8 @@ export const sectionDraftJsonSchema = {
 } as const;
 
 export const reviewJsonSchema = {
-  type: "object", additionalProperties: false,
+  type: "object",
+  additionalProperties: false,
   required: ["overallScore","scores","issues"],
   properties: {
     overallScore: { type: "number", minimum: 0, maximum: 100 },
