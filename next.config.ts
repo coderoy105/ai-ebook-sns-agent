@@ -10,7 +10,6 @@ const nextConfig: NextConfig = {
       { source: "/api/auth/openrouter/exchange", destination: "/api/core/auth/openrouter-exchange" },
       { source: "/api/auth/register", destination: "/api/core/auth/register" },
       { source: "/api/books", destination: "/api/core/books" },
-      { source: "/api/books/:id/export/:format", destination: "/api/core/books/:id/export/:format" },
       { source: "/api/books/:id/generate", destination: "/api/core/books/:id/generate" },
       { source: "/api/books/:id/generate-free", destination: "/api/core/books/:id/generate" },
       { source: "/api/books/:id/plan", destination: "/api/core/books/:id/plan" },
