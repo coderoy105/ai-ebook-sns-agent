@@ -14,6 +14,17 @@ export type CodexRuntimeStatus = {
 
 type RuntimePayload = { error?: unknown } & Record<string, unknown>;
 
+const DEFAULT_GENERATION_TIMEOUT_MS = 165000;
+const MAX_GENERATION_TIMEOUT_MS = 180000;
+const RUNTIME_OVERHEAD_BUDGET_MS = 70000;
+const MAX_RUNTIME_REQUEST_MS = 270000;
+
+function boundedGenerationTimeout(value: number | undefined) {
+  const requested = Number(value ?? DEFAULT_GENERATION_TIMEOUT_MS);
+  if (!Number.isFinite(requested)) return DEFAULT_GENERATION_TIMEOUT_MS;
+  return Math.min(Math.max(Math.trunc(requested), 30000), MAX_GENERATION_TIMEOUT_MS);
+}
+
 function safeErrorDetail(value: unknown, depth = 0): unknown {
   if (depth > 2 || value == null) return value;
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
@@ -127,6 +138,11 @@ export async function generateCodexRuntimeStructured<T>(userId: string, args: {
   timeoutMs?: number;
   parse: (value: unknown) => T;
 }) {
+  // Vercel terminates the route at 300 seconds. Keep the actual model turn well
+  // below that hard ceiling and reserve time for OIDC, worker acquisition,
+  // account/model preflight, JSON parsing and the Workflow step response.
+  const generationTimeoutMs = boundedGenerationTimeout(args.timeoutMs);
+  const runtimeTimeoutMs = Math.min(generationTimeoutMs + RUNTIME_OVERHEAD_BUDGET_MS, MAX_RUNTIME_REQUEST_MS);
   const result = await callCodexRuntime<RuntimePayload & {
     value: unknown;
     usage: { inputTokens: number; outputTokens: number; durationMs: number; model: string; requestId?: string };
@@ -137,7 +153,7 @@ export async function generateCodexRuntimeStructured<T>(userId: string, args: {
     jsonSchema: args.jsonSchema,
     system: args.system,
     prompt: args.prompt,
-    timeoutMs: args.timeoutMs
-  }, Math.min((args.timeoutMs ?? 240000) + 20000, 300000));
+    timeoutMs: generationTimeoutMs
+  }, runtimeTimeoutMs);
   return { value: args.parse(result.value), usage: result.usage };
 }
