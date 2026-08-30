@@ -19,6 +19,22 @@ function WorkspaceLoading() {
   );
 }
 
+function resolveBookIdFromLocation() {
+  const current = new URL(window.location.href);
+  const queryId = current.searchParams.get("bookId")?.trim();
+  if (queryId) return queryId;
+
+  // /books/:id is rewritten by Next.js to /book?bookId=:id. Rewrites keep the
+  // browser-visible pathname, so window.location.search does not contain bookId.
+  const pathMatch = current.pathname.match(/^\/books\/([^/?#]+)\/?$/u);
+  if (!pathMatch?.[1]) return "";
+  try {
+    return decodeURIComponent(pathMatch[1]).trim();
+  } catch {
+    return pathMatch[1].trim();
+  }
+}
+
 export default function BookWorkspacePage() {
   const router = useRouter();
   const [bookId, setBookId] = useState("");
@@ -31,7 +47,7 @@ export default function BookWorkspacePage() {
     const supabase = createClient();
     void (async () => {
       await Promise.resolve();
-      const id = new URL(window.location.href).searchParams.get("bookId")?.trim() ?? "";
+      const id = resolveBookIdFromLocation();
       if (!active) return;
       if (!id) {
         setError("원고 ID가 없습니다.");
@@ -42,7 +58,7 @@ export default function BookWorkspacePage() {
       try {
         const { data: userData } = await supabase.auth.getUser();
         if (!userData.user) {
-          router.replace(`/login?next=${encodeURIComponent(`/book?bookId=${id}`)}`);
+          router.replace(`/login?next=${encodeURIComponent(`/books/${id}`)}`);
           return;
         }
         const { data, error: queryError } = await supabase.from("books").select(`
