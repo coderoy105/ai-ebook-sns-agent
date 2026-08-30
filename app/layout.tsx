@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { ExportDownloadGuard } from "@/components/export-download-guard";
 import "./globals.css";
 import "./editor-extras.css";
 import "./product-v2.css";
@@ -82,7 +83,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <head>
         <script dangerouslySetInnerHTML={{ __html: pollingGuardScript }} />
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+        <ExportDownloadGuard />
+      </body>
     </html>
   );
 }
