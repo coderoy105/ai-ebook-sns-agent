@@ -18,6 +18,16 @@ type WorkerRequest = {
 };
 
 const encoder = new TextEncoder();
+const DEFAULT_GENERATION_TIMEOUT_MS = 165000;
+const MAX_GENERATION_TIMEOUT_MS = 180000;
+const WORKER_TRANSPORT_HEADROOM_MS = 45000;
+const MAX_WORKER_TRANSPORT_TIMEOUT_MS = 230000;
+
+function boundedGenerationTimeout(value: number | undefined) {
+  const requested = Number(value ?? DEFAULT_GENERATION_TIMEOUT_MS);
+  if (!Number.isFinite(requested)) return DEFAULT_GENERATION_TIMEOUT_MS;
+  return Math.min(Math.max(Math.trunc(requested), 30000), MAX_GENERATION_TIMEOUT_MS);
+}
 
 function workerConfig() {
   const baseUrl = process.env.CODEX_WORKER_URL?.trim().replace(/\/$/, "") ?? "";
@@ -124,12 +134,19 @@ export async function generateCodexWorkerStructured<T>(userId: string, args: {
   timeoutMs?: number;
   parse: (value: unknown) => T;
 }) {
+  const generationTimeoutMs = boundedGenerationTimeout(args.timeoutMs);
+  const transportTimeoutMs = Math.min(
+    generationTimeoutMs + WORKER_TRANSPORT_HEADROOM_MS,
+    MAX_WORKER_TRANSPORT_TIMEOUT_MS
+  );
   const result = await callCodexWorker<{
     value: unknown;
     usage: { inputTokens: number; outputTokens: number; durationMs: number; model: string; requestId?: string };
   }>("/generate", {
     method: "POST",
-    timeoutMs: args.timeoutMs ?? 240000,
+    // The worker's own CODEX_GENERATION_TIMEOUT must fire first. Keep transport
+    // alive long enough for that structured error to return to the Workflow.
+    timeoutMs: transportTimeoutMs,
     body: {
       userId,
       model: CODEX_LUNA_MODEL,
@@ -137,7 +154,7 @@ export async function generateCodexWorkerStructured<T>(userId: string, args: {
       jsonSchema: args.jsonSchema,
       system: args.system,
       prompt: args.prompt,
-      timeoutMs: args.timeoutMs
+      timeoutMs: generationTimeoutMs
     }
   });
   return { value: args.parse(result.value), usage: result.usage };
