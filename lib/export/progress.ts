@@ -4,6 +4,7 @@ export type ExportProgressPayload = {
   progress: number;
   phase: ExportProgressPhase;
   message: string;
+  updatedAt?: string | null;
 };
 
 const PROGRESS_PREFIX = "__EXPORT_PROGRESS__";
@@ -12,7 +13,8 @@ export function encodeExportProgress(payload: ExportProgressPayload) {
   return `${PROGRESS_PREFIX}${JSON.stringify({
     progress: Math.max(0, Math.min(90, payload.progress)),
     phase: payload.phase,
-    message: payload.message
+    message: payload.message,
+    updatedAt: payload.updatedAt ?? new Date().toISOString()
   })}`;
 }
 
@@ -24,7 +26,8 @@ export function decodeExportProgress(value: string | null | undefined): ExportPr
     return {
       progress: Math.max(0, Math.min(90, parsed.progress)),
       phase: parsed.phase as ExportProgressPhase,
-      message: parsed.message
+      message: parsed.message,
+      updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : null
     };
   } catch {
     return null;
