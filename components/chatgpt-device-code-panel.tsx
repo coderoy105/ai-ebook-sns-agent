@@ -45,13 +45,11 @@ export function ChatGptDeviceCodePanel({ verificationUrl, userCode }: Props) {
 
   useEffect(() => {
     let active = true;
-    if (!navigator.clipboard?.writeText) {
-      setCopied(false);
-      return () => { active = false; };
+    if (navigator.clipboard?.writeText) {
+      void navigator.clipboard.writeText(userCode)
+        .then(() => { if (active) setCopied(true); })
+        .catch(() => { if (active) setCopied(false); });
     }
-    void navigator.clipboard.writeText(userCode)
-      .then(() => { if (active) setCopied(true); })
-      .catch(() => { if (active) setCopied(false); });
     return () => { active = false; };
   }, [userCode]);
 
