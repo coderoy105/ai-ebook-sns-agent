@@ -42,8 +42,8 @@ function describeError(error: unknown) {
   try {
     const raw = JSON.stringify(diagnosticValue(error));
     const sanitized = raw
-      .replace(/Bearer\\s+[A-Za-z0-9._~-]+/gi, "Bearer [redacted]")
-      .replace(/\"(access_token|refresh_token|id_token|token)\"\s*:\s*\"[^\"]+\"/gi, '"$1":"[redacted]"')
+      .replace(/Bearer\s+[A-Za-z0-9._~-]+/gi, "Bearer [redacted]")
+      .replace(/"(access_token|refresh_token|id_token|token)"\s*:\s*"[^"]+"/gi, '"$1":"[redacted]"')
       .replace(/[A-Za-z0-9_-]{80,}/g, "[redacted]")
       .slice(0, 1600);
     if (sanitized && sanitized !== "{}") return sanitized;
@@ -54,6 +54,18 @@ function describeError(error: unknown) {
 function commandError(prefix: string, exitCode: number, stderr: string) {
   const detail = stderr.trim().slice(0, 1000);
   return new Error(detail ? `${prefix}: ${detail}` : `${prefix}: exit ${exitCode}`);
+}
+
+export function isRecoverableSandboxTransportError(error: unknown) {
+  const record = typeof error === "object" && error !== null ? error as Record<string, unknown> : null;
+  const code = record && typeof record.code === "string" ? record.code : "";
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === "string"
+      ? error
+      : describeError(error);
+  return code === "sandbox_stream_closed"
+    || /sandbox_stream_closed|Sandbox stream was closed|not accepting commands|sandbox.*stream.*closed/i.test(message);
 }
 
 async function readVersion(sandbox: Sandbox) {
@@ -184,6 +196,25 @@ async function getSandbox() {
   return sandboxPromise;
 }
 
+async function requestWithSandboxReconnect<T>(pathWithQuery: string, request: SandboxWorkerRequest) {
+  let lastError: unknown = new Error("CODEX_SANDBOX_UNAVAILABLE");
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const sandbox = await getSandbox();
+      return await localRequest<T>(sandbox, pathWithQuery, request);
+    } catch (error) {
+      lastError = error;
+      if (!isRecoverableSandboxTransportError(error) || attempt > 0) throw error;
+      // A warm Vercel function can retain an SDK handle after its control stream
+      // has closed. Drop that handle and retrieve the named persistent sandbox
+      // again so the SDK opens a fresh stream and auto-resumes the VM.
+      sandboxPromise = null;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+  throw lastError;
+}
+
 export function codexSandboxSupported() {
   return process.env.VERCEL === "1" || Boolean(process.env.VERCEL_OIDC_TOKEN) || Boolean(
     process.env.VERCEL_TOKEN && process.env.VERCEL_TEAM_ID && process.env.VERCEL_PROJECT_ID
@@ -193,11 +224,10 @@ export function codexSandboxSupported() {
 export async function callCodexSandboxWorker<T>(pathWithQuery: string, request: SandboxWorkerRequest = {}): Promise<T> {
   if (!pathWithQuery.startsWith("/")) throw new Error("CODEX_WORKER_INVALID_PATH");
   try {
-    const sandbox = await getSandbox();
-    return await localRequest<T>(sandbox, pathWithQuery, request);
+    return await requestWithSandboxReconnect<T>(pathWithQuery, request);
   } catch (error) {
-    sandboxPromise = null;
     const message = error instanceof Error ? error.message : describeError(error);
+    if (isRecoverableSandboxTransportError(error) || /^CODEX_SANDBOX_ACQUIRE_FAILED:/.test(message)) sandboxPromise = null;
     if (/^(CODEX_|WORKER_|INVALID_|REQUEST_)/.test(message)) throw new Error(message);
     throw new Error(`CODEX_SANDBOX_UNAVAILABLE:${describeError(error)}`);
   }
