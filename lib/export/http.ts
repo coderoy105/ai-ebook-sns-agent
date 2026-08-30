@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
+import { start } from "workflow/api";
 import { requireUser } from "@/lib/supabase/server";
 import { assertRateLimit } from "@/lib/security/rate-limit";
-import { collectBook, bookToMarkdown, stripMarkdown } from "./collect";
-import { renderBookPdf } from "./pdf";
-import { renderBookEpub } from "./epub";
-import { renderBookDocx } from "./docx";
+import { generateBookExportWorkflow } from "@/lib/jobs/export-workflow";
+import { readExportArtifact } from "./artifact-store";
+import { decodeExportProgress, encodeExportProgress } from "./progress";
 
 const exportFormats = {
   pdf: { type: "application/pdf", ext: "pdf" },
@@ -15,10 +15,8 @@ const exportFormats = {
 } as const;
 
 type ExportFormat = keyof typeof exportFormats;
-type ProgressPhase = "queued" | "collecting" | "rendering" | "merging" | "ready";
-type ProgressPayload = { progress: number; phase: ProgressPhase; message: string };
 
-const progressPrefix = "__EXPORT_PROGRESS__";
+type ServiceSupabase = Awaited<ReturnType<typeof requireUser>>["supabase"];
 
 function bad(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status, headers: { "cache-control": "no-store" } });
@@ -45,29 +43,10 @@ function contentDisposition(title: string, ext: string) {
   return `attachment; filename="${asciiBase}.${ext}"; filename*=UTF-8''${encodeURIComponent(unicodeName)}`;
 }
 
-function encodeProgress(payload: ProgressPayload) {
-  return `${progressPrefix}${JSON.stringify(payload)}`;
-}
-
-function decodeProgress(value: string | null | undefined): ProgressPayload | null {
-  if (!value?.startsWith(progressPrefix)) return null;
-  try {
-    const parsed = JSON.parse(value.slice(progressPrefix.length)) as Partial<ProgressPayload>;
-    if (typeof parsed.progress !== "number" || typeof parsed.message !== "string" || typeof parsed.phase !== "string") return null;
-    return {
-      progress: Math.max(0, Math.min(90, parsed.progress)),
-      phase: parsed.phase as ProgressPhase,
-      message: parsed.message
-    };
-  } catch {
-    return null;
-  }
-}
-
-async function ownedBook(bookId: string, userId: string, supabase: Awaited<ReturnType<typeof requireUser>>["supabase"]) {
+async function ownedBook(bookId: string, userId: string, supabase: ServiceSupabase) {
   const { data, error } = await supabase
     .from("books")
-    .select("id,title,user_id")
+    .select("id,title,user_id,updated_at")
     .eq("id", bookId)
     .eq("user_id", userId)
     .single();
@@ -75,37 +54,106 @@ async function ownedBook(bookId: string, userId: string, supabase: Awaited<Retur
   return data;
 }
 
-async function updateProgress(
-  supabase: Awaited<ReturnType<typeof requireUser>>["supabase"],
-  jobId: string,
-  progress: number,
-  phase: ProgressPhase,
-  message: string
+async function latestExportJob(
+  supabase: ServiceSupabase,
+  input: { bookId: string; userId: string; format: ExportFormat; jobId?: string | null }
 ) {
-  await supabase.from("export_jobs").update({
-    status: "RUNNING",
-    error_message: encodeProgress({ progress: Math.max(0, Math.min(90, progress)), phase, message })
-  }).eq("id", jobId);
+  let query = supabase.from("export_jobs")
+    .select("id,book_id,user_id,format,status,asset_id,error_message,created_at,finished_at")
+    .eq("book_id", input.bookId)
+    .eq("user_id", input.userId)
+    .eq("format", input.format.toUpperCase());
+
+  if (input.jobId) {
+    return query.eq("id", input.jobId).maybeSingle();
+  }
+  return query.order("created_at", { ascending: false }).limit(1).maybeSingle();
+}
+
+function completedExportIsFresh(bookUpdatedAt: unknown, finishedAt: unknown) {
+  const bookTime = Date.parse(String(bookUpdatedAt ?? ""));
+  const exportTime = Date.parse(String(finishedAt ?? ""));
+  if (!Number.isFinite(bookTime) || !Number.isFinite(exportTime)) return false;
+  return exportTime >= bookTime;
 }
 
 export async function startBookExport(bookId: string, rawFormat: string) {
   try {
     if (!(rawFormat in exportFormats)) return bad("Unsupported format");
-    const exportFormat = rawFormat as ExportFormat;
+    const format = rawFormat as ExportFormat;
     const { supabase, user } = await requireUser();
-    await assertRateLimit(user.id, "book-export", 20, 3600);
     const book = await ownedBook(bookId, user.id, supabase);
     if (!book) return bad("Book not found", 404);
 
-    const { data: job, error } = await supabase.from("export_jobs").insert({
+    const { data: existing } = await latestExportJob(supabase, { bookId, userId: user.id, format });
+    if (existing && (existing.status === "QUEUED" || existing.status === "RUNNING")) {
+      return NextResponse.json({
+        jobId: existing.id,
+        status: existing.status,
+        background: true,
+        reused: true
+      }, { status: 202, headers: { "cache-control": "no-store" } });
+    }
+    if (
+      existing &&
+      existing.status === "COMPLETED" &&
+      existing.asset_id &&
+      completedExportIsFresh(book.updated_at, existing.finished_at)
+    ) {
+      return NextResponse.json({
+        jobId: existing.id,
+        status: "COMPLETED",
+        background: true,
+        reused: true,
+        ready: true
+      }, { status: 200, headers: { "cache-control": "no-store" } });
+    }
+
+    await assertRateLimit(user.id, "book-export", 20, 3600);
+    const { data: job, error: jobError } = await supabase.from("export_jobs").insert({
       book_id: bookId,
       user_id: user.id,
-      format: exportFormat.toUpperCase(),
-      status: "RUNNING",
-      error_message: encodeProgress({ progress: 1, phase: "queued", message: `${exportFormat.toUpperCase()} 생성을 준비하고 있습니다.` })
+      format: format.toUpperCase(),
+      status: "QUEUED",
+      error_message: encodeExportProgress({
+        progress: 1,
+        phase: "queued",
+        message: "백그라운드 파일 생성을 등록하고 있습니다."
+      })
     }).select("id").single();
-    if (error || !job) throw error ?? new Error("EXPORT_JOB_CREATE_FAILED");
-    return NextResponse.json({ jobId: job.id }, { headers: { "cache-control": "no-store" } });
+    if (jobError || !job) throw jobError ?? new Error("EXPORT_JOB_CREATE_FAILED");
+
+    try {
+      const run = await start(generateBookExportWorkflow, [{
+        bookId,
+        userId: user.id,
+        jobId: String(job.id),
+        format
+      }]);
+      const { error: updateError } = await supabase.from("export_jobs").update({
+        status: "RUNNING",
+        error_message: encodeExportProgress({
+          progress: 2,
+          phase: "queued",
+          message: "백그라운드 작업이 시작되었습니다. 앱을 닫아도 계속 진행됩니다."
+        })
+      }).eq("id", job.id);
+      if (updateError) throw new Error(updateError.message);
+
+      return NextResponse.json({
+        jobId: job.id,
+        runId: run.runId,
+        status: "RUNNING",
+        background: true
+      }, { status: 202, headers: { "cache-control": "no-store" } });
+    } catch (error) {
+      await supabase.from("export_jobs").update({
+        status: "FAILED",
+        error_message: error instanceof Error ? error.message : String(error),
+        finished_at: new Date().toISOString()
+      }).eq("id", job.id);
+      throw error;
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Export start failed";
     return bad(message, message === "UNAUTHORIZED" ? 401 : message === "RATE_LIMITED" ? 429 : 400);
@@ -115,44 +163,54 @@ export async function startBookExport(bookId: string, rawFormat: string) {
 export async function getBookExportStatus(bookId: string, rawFormat: string, jobId: string | null) {
   try {
     if (!(rawFormat in exportFormats)) return bad("Unsupported format");
-    if (!jobId) return bad("EXPORT_JOB_ID_REQUIRED");
-    const exportFormat = rawFormat as ExportFormat;
+    const format = rawFormat as ExportFormat;
     const { supabase, user } = await requireUser();
     const book = await ownedBook(bookId, user.id, supabase);
     if (!book) return bad("Book not found", 404);
 
-    const { data: job, error } = await supabase.from("export_jobs")
-      .select("id,status,error_message,finished_at")
-      .eq("id", jobId)
-      .eq("book_id", bookId)
-      .eq("user_id", user.id)
-      .eq("format", exportFormat.toUpperCase())
-      .single();
+    const { data: job, error } = await latestExportJob(supabase, {
+      bookId,
+      userId: user.id,
+      format,
+      jobId
+    });
     if (error || !job) return bad("Export job not found", 404);
 
     if (job.status === "FAILED") {
       return NextResponse.json({
+        jobId: job.id,
         status: "FAILED",
         progress: 0,
         phase: "error",
+        background: true,
         message: job.error_message || "파일 생성에 실패했습니다."
       }, { headers: { "cache-control": "no-store" } });
     }
-    if (job.status === "COMPLETED") {
+
+    if (job.status === "COMPLETED" && job.asset_id) {
       return NextResponse.json({
+        jobId: job.id,
         status: "COMPLETED",
         progress: 90,
         phase: "ready",
-        message: "파일 생성이 완료되어 다운로드를 시작합니다."
+        background: true,
+        ready: true,
+        message: "백그라운드 파일 생성이 완료되었습니다. 다운로드를 시작합니다."
       }, { headers: { "cache-control": "no-store" } });
     }
 
-    const progress = decodeProgress(job.error_message) ?? {
-      progress: 1,
+    const progress = decodeExportProgress(job.error_message) ?? {
+      progress: job.status === "QUEUED" ? 1 : 2,
       phase: "queued" as const,
-      message: "파일 생성을 준비하고 있습니다."
+      message: "백그라운드에서 파일을 만들고 있습니다. 앱을 닫아도 계속 진행됩니다."
     };
-    return NextResponse.json({ status: job.status, ...progress }, { headers: { "cache-control": "no-store" } });
+    return NextResponse.json({
+      jobId: job.id,
+      status: job.status,
+      background: true,
+      ready: false,
+      ...progress
+    }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Export status failed";
     return bad(message, message === "UNAUTHORIZED" ? 401 : 400);
@@ -162,87 +220,55 @@ export async function getBookExportStatus(bookId: string, rawFormat: string, job
 export async function handleBookExport(bookId: string, rawFormat: string, jobId?: string | null) {
   try {
     if (!(rawFormat in exportFormats)) return bad("Unsupported format");
-    const exportFormat = rawFormat as ExportFormat;
+    const format = rawFormat as ExportFormat;
     const { supabase, user } = await requireUser();
-    const bookOwner = await ownedBook(bookId, user.id, supabase);
-    if (!bookOwner) return bad("Book not found", 404);
+    const book = await ownedBook(bookId, user.id, supabase);
+    if (!book) return bad("Book not found", 404);
 
-    let activeJobId = jobId ?? "";
-    if (activeJobId) {
-      const { data: existing } = await supabase.from("export_jobs")
-        .select("id,status")
-        .eq("id", activeJobId)
-        .eq("book_id", bookId)
-        .eq("user_id", user.id)
-        .eq("format", exportFormat.toUpperCase())
-        .single();
-      if (!existing || existing.status !== "RUNNING") return bad("Export job not found", 404);
-    } else {
-      await assertRateLimit(user.id, "book-export", 20, 3600);
-      const { data: job, error } = await supabase.from("export_jobs").insert({
-        book_id: bookId,
-        user_id: user.id,
-        format: exportFormat.toUpperCase(),
-        status: "RUNNING",
-        error_message: encodeProgress({ progress: 1, phase: "queued", message: `${exportFormat.toUpperCase()} 생성을 준비하고 있습니다.` })
-      }).select("id").single();
-      if (error || !job) throw error ?? new Error("EXPORT_JOB_CREATE_FAILED");
-      activeJobId = job.id;
+    const { data: job, error: jobError } = await latestExportJob(supabase, {
+      bookId,
+      userId: user.id,
+      format,
+      jobId
+    });
+    if (jobError || !job) return bad("Export job not found", 404);
+    if (job.status !== "COMPLETED" || !job.asset_id) {
+      return NextResponse.json({
+        error: "EXPORT_NOT_READY",
+        jobId: job.id,
+        status: job.status,
+        background: true
+      }, { status: 409, headers: { "cache-control": "no-store" } });
     }
 
-    try {
-      await updateProgress(supabase, activeJobId, 3, "collecting", "원고와 목차를 불러오고 있습니다.");
-      const book = await collectBook(bookId);
-      let body: Uint8Array;
+    const { data: asset, error: assetError } = await supabase.from("assets")
+      .select("id,book_id,user_id,storage_path,mime_type,metadata")
+      .eq("id", job.asset_id)
+      .eq("book_id", bookId)
+      .eq("user_id", user.id)
+      .single();
+    if (assetError || !asset) return bad("Export artifact not found", 404);
 
-      if (exportFormat === "pdf") {
-        body = new Uint8Array(await renderBookPdf(book, async (progress, message) => {
-          const phase: ProgressPhase = progress >= 90 ? "merging" : "rendering";
-          await updateProgress(supabase, activeJobId, progress, phase, message);
-        }));
-      } else if (exportFormat === "epub") {
-        await updateProgress(supabase, activeJobId, 35, "rendering", "EPUB 파일을 만들고 있습니다.");
-        body = new Uint8Array(await renderBookEpub(book));
-      } else if (exportFormat === "docx") {
-        await updateProgress(supabase, activeJobId, 35, "rendering", "DOCX 파일을 만들고 있습니다.");
-        body = new Uint8Array(await renderBookDocx(book));
-      } else {
-        await updateProgress(supabase, activeJobId, 55, "rendering", "텍스트 파일을 만들고 있습니다.");
-        const markdown = bookToMarkdown(book);
-        const text = exportFormat === "txt" ? stripMarkdown(markdown) : markdown;
-        body = new TextEncoder().encode(text);
+    const body = await readExportArtifact(String(asset.storage_path));
+    if (format === "pdf" && body.subarray(0, 4).toString("ascii") !== "%PDF") {
+      throw new Error("PDF_RENDER_INVALID");
+    }
+
+    const meta = exportFormats[format];
+    return new Response(body as unknown as BodyInit, {
+      status: 200,
+      headers: {
+        "content-type": typeof asset.mime_type === "string" && asset.mime_type ? asset.mime_type : meta.type,
+        "content-length": String(body.byteLength),
+        "content-disposition": contentDisposition(String(book.title), meta.ext),
+        "cache-control": "private, no-store, max-age=0",
+        "x-content-type-options": "nosniff",
+        "x-export-job-id": String(job.id),
+        "x-export-background": "1"
       }
-
-      if (body.byteLength === 0) throw new Error("EXPORT_EMPTY_FILE");
-
-      await supabase.from("export_jobs").update({
-        status: "COMPLETED",
-        error_message: null,
-        finished_at: new Date().toISOString()
-      }).eq("id", activeJobId);
-
-      const meta = exportFormats[exportFormat];
-      return new Response(body as unknown as BodyInit, {
-        status: 200,
-        headers: {
-          "content-type": meta.type,
-          "content-length": String(body.byteLength),
-          "content-disposition": contentDisposition(book.title, meta.ext),
-          "cache-control": "private, no-store, max-age=0",
-          "x-content-type-options": "nosniff",
-          "x-export-job-id": activeJobId
-        }
-      });
-    } catch (error) {
-      await supabase.from("export_jobs").update({
-        status: "FAILED",
-        error_message: error instanceof Error ? error.message : String(error),
-        finished_at: new Date().toISOString()
-      }).eq("id", activeJobId);
-      throw error;
-    }
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Export failed";
-    return bad(message, message === "UNAUTHORIZED" ? 401 : message === "RATE_LIMITED" ? 429 : 400);
+    return bad(message, message === "UNAUTHORIZED" ? 401 : 400);
   }
 }
