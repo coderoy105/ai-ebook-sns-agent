@@ -47,6 +47,29 @@ function codexPayload(status: CodexRuntimeStatus) {
   };
 }
 
+async function cachedCodexPayload(userId: string) {
+  const service = createServiceSupabase();
+  const { data } = await service.from("codex_connection_profiles")
+    .select("email,plan_type,selected_model,model_available,rate_limits")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (!data || data.model_available !== true) return null;
+  return {
+    connected: true,
+    backgroundReady: true,
+    workerConfigured: true,
+    provider: "codex_chatgpt",
+    authMode: "chatgpt",
+    model: data.selected_model || CODEX_LUNA_MODEL,
+    modelAvailable: true,
+    models: [data.selected_model || CODEX_LUNA_MODEL],
+    planType: data.plan_type ?? null,
+    email: data.email ?? null,
+    rateLimits: data.rate_limits ?? null,
+    statusSource: "cached"
+  };
+}
+
 function errorStatus(message: string) {
   if (message === "UNAUTHORIZED") return 401;
   if (
@@ -62,9 +85,16 @@ export async function handleAiConnectionGET(request: Request) {
   try {
     const { user } = await requireUser();
     if (wantsCodex(request)) {
-      const status = await readCodexRuntimeStatus(user.id);
-      await syncCodexProfile(user.id, status);
-      return NextResponse.json(codexPayload(status));
+      try {
+        const status = await readCodexRuntimeStatus(user.id);
+        await syncCodexProfile(user.id, status);
+        return NextResponse.json({ ...codexPayload(status), statusSource: "live" });
+      } catch (error) {
+        if (!isTransientCodexError(error)) throw error;
+        const cached = await cachedCodexPayload(user.id);
+        if (cached) return NextResponse.json(cached);
+        throw error;
+      }
     }
 
     const service = createServiceSupabase();
