@@ -1,6 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { getVercelOidcToken } from "@vercel/oidc";
 import { SUPABASE_URL } from "@/lib/supabase/config";
 
 type BridgeError = { message: string; code?: string; details?: string; hint?: string };
@@ -24,10 +23,17 @@ type QueryState = {
 };
 
 async function bridgeRequest<T = unknown>(body: Record<string, unknown>): Promise<BridgeResult<T>> {
-  const oidcToken = process.env.VERCEL_OIDC_TOKEN ?? await getVercelOidcToken({
-    project: "ai-book-studio",
-    team: "koreassp105-1594s-projects"
-  });
+  let oidcToken = process.env.VERCEL_OIDC_TOKEN;
+  if (!oidcToken) {
+    // Vercel Workflow imports service-layer modules while compiling the workflow body.
+    // Loading @vercel/oidc lazily keeps jose's Node/CJS runtime out of that sandbox;
+    // this branch executes only when a Node-backed server/step actually makes a bridge call.
+    const { getVercelOidcToken } = await import("@vercel/oidc");
+    oidcToken = await getVercelOidcToken({
+      project: "ai-book-studio",
+      team: "koreassp105-1594s-projects"
+    });
+  }
   if (!oidcToken) throw new Error("Vercel OIDC token is unavailable.");
 
   const response = await fetch(`${SUPABASE_URL}/functions/v1/ai-book-service`, {
