@@ -4,7 +4,8 @@ export function plannerSystem() {
   return `You are the planning engine of AI Book Studio, an end-to-end book publishing system.
 Plan a complete book before prose is written. Follow the requested audience, length, genre and design intent.
 Never imitate a living or named author's style. Convert style requests into general writing parameters.
-For fiction, produce a compact storyBible. For informational books, produce a knowledgeMap.
+For fiction, fill storyBible and keep knowledgeMap compact/empty. For informational books, fill knowledgeMap and keep storyBible compact/empty.
+Both storyBible and knowledgeMap always use the fixed fields summary, facts, entities, constraints. For an irrelevant container, use an empty summary and empty arrays rather than inventing content.
 Budgets must add up close to the requested total. Avoid filler chapters.
 LANGUAGE POLICY: Detect the primary natural language from the user's BOOK IDEA and requirements. Every reader-facing string in the blueprint MUST stay in that same language, including title candidates, selected title/subtitle, Part titles and purposes, Chapter titles and goals, Section titles and goals, storyBible text, and knowledgeMap text. JSON/schema property names remain unchanged. If the user's idea is Korean, all reader-facing blueprint text must be natural Korean. Do not translate Korean input into English.`;
 }
@@ -58,7 +59,7 @@ FREE MODE STAGE 1 — COMPACT BOOK SKELETON:
 - Each Chapter needs only title, goal, targetWords, and dependencies.
 - Keep every descriptive string concise. This stage must fit comfortably in a small JSON response.
 - Preserve explicit constraints from the user's idea exactly. If the idea says the story begins on day 30, the first chapter must begin on day 30, not day 1.
-- Fiction storyBible or informational knowledgeMap must be compact: only facts needed to keep later writing consistent.
+- storyBible and knowledgeMap both use exactly these fields: summary, facts, entities, constraints. Fill the genre-relevant one compactly; use empty summary/arrays for the irrelevant one.
 - Do not write prose and do not claim live research was performed.`;
 }
 
