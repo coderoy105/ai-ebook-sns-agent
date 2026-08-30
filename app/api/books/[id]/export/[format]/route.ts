@@ -18,5 +18,5 @@ export async function GET(
 ) {
   const { id, format } = await params;
   const jobId = new URL(request.url).searchParams.get("jobId");
-  return handleBookExport(id, format.toLowerCase(), jobId);
+  return handleBookExport(id, format.toLowerCase(), jobId, request.headers.get("accept"));
 }
