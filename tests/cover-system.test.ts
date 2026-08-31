@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { createCoverConcepts, normalizeCoverConcept } from "../lib/design/cover-system.ts";
+import { createCoverConcepts, normalizeCoverConcept } from "../lib/design/cover-system";
 
 const pdfSource = readFileSync(new URL("../lib/export/pdf.tsx", import.meta.url), "utf8");
 const composeSource = readFileSync(new URL("../lib/design/compose.ts", import.meta.url), "utf8");
