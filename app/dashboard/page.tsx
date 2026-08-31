@@ -4,9 +4,11 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
+import { BookCoverArt } from "@/components/book-cover-art";
 import { createClient } from "@/lib/supabase/client";
 
 type JobState = { status?: string; progress?: number; created_at?: string };
+type CoverResult = { concept?: unknown; is_selected?: boolean; created_at?: string };
 type BookCard = {
   id: string;
   title: string;
@@ -16,7 +18,7 @@ type BookCard = {
   progress: number;
   target_pages: number;
   updated_at: string;
-  cover: { palette?: string[] } | null;
+  cover: unknown | null;
   latestJob: JobState | null;
 };
 
@@ -84,15 +86,17 @@ export default function DashboardPage() {
         }
         const { data, error: queryError } = await supabase
           .from("books")
-          .select("id,title,subtitle,book_type,status,progress,target_pages,updated_at,cover:book_covers(concept),generation_jobs(status,progress,created_at)")
+          .select("id,title,subtitle,book_type,status,progress,target_pages,updated_at,cover:book_covers(concept,is_selected,created_at),generation_jobs(status,progress,created_at)")
           .order("updated_at", { ascending: false });
         if (queryError) throw queryError;
         const normalized = (data ?? []).map((book) => {
           const jobs = Array.isArray(book.generation_jobs) ? [...book.generation_jobs] : [];
           jobs.sort((a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime());
+          const covers = (Array.isArray(book.cover) ? [...book.cover] : []) as CoverResult[];
+          covers.sort((a, b) => Number(Boolean(b.is_selected)) - Number(Boolean(a.is_selected)) || new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime());
           return {
             ...book,
-            cover: Array.isArray(book.cover) ? (book.cover[0]?.concept ?? null) : null,
+            cover: covers[0]?.concept ?? null,
             latestJob: jobs[0] ?? null
           };
         }) as BookCard[];
@@ -179,10 +183,8 @@ export default function DashboardPage() {
               return (
                 <Link key={book.id} href={`/book?bookId=${encodeURIComponent(book.id)}`} className="manuscript-row">
                   <div className="manuscript-index" aria-hidden="true">{String(index + 1).padStart(2, "0")}</div>
-                  <div className="book-spine" aria-hidden="true">
-                    <span>{book.book_type}</span>
-                    <strong>{book.title}</strong>
-                    <small>{book.target_pages}P</small>
+                  <div style={{ width: 56 }} aria-hidden="true">
+                    <BookCoverArt concept={book.cover} title={book.title} subtitle={book.subtitle} bookType={book.book_type} compact />
                   </div>
                   <div className="manuscript-copy">
                     <div className="manuscript-title-line"><strong>{book.title}</strong><span className={`manuscript-state state-${state}`}>{statusLabel(book.status, book.latestJob?.status)}</span></div>
