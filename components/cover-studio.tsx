@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { BookCoverArt } from "./book-cover-art";
-import { normalizeCoverConcept } from "@/lib/design/cover-system";
+import { normalizeCoverConcept, type CoverConcept } from "@/lib/design/cover-system";
 import styles from "./cover-studio.module.css";
 
 export type CoverRow = {
@@ -18,6 +18,20 @@ type Props = {
   subtitle?: string | null;
   bookType?: string | null;
   initialCovers?: CoverRow[];
+};
+
+const layoutLabel: Record<CoverConcept["layout"], string> = {
+  "publisher-grid": "출판 편집 그리드",
+  poster: "서점 포스터형",
+  "quiet-literary": "문학형 여백",
+  "split-field": "분할 편집형",
+  museum: "컨셉 아트형"
+};
+
+const finishLabel: Record<CoverConcept["finish"], string> = {
+  uncoated: "무광 종이",
+  "soft-touch": "소프트 터치",
+  cloth: "패브릭 질감"
 };
 
 export function CoverStudio({ bookId, title, subtitle, bookType, initialCovers = [] }: Props) {
@@ -79,17 +93,18 @@ export function CoverStudio({ bookId, title, subtitle, bookType, initialCovers =
     <div className={styles.studio}>
       <div className={styles.header}>
         <div>
+          <span className={styles.eyebrow}>BOOK JACKET DIRECTIONS</span>
           <h4>표지 스튜디오</h4>
-          <p>책의 핵심 상징과 장르 cliché를 분리해 서로 다른 출판 방향 3개를 설계합니다.</p>
+          <p>실제 출판 표지처럼 제목 계층, 여백, 인쇄 질감, 장르 상징을 다르게 설계한 3개 방향입니다.</p>
         </div>
-        <button type="button" className={styles.regenerate} disabled={busy || loading} onClick={regenerate}>{busy ? "작업 중…" : "새 3안"}</button>
+        <button type="button" className={styles.regenerate} disabled={busy || loading} onClick={regenerate}>{busy ? "작업 중…" : "새 3안 만들기"}</button>
       </div>
 
-      {loading && !covers.length ? <p className={styles.detail}>표지 방향을 설계하고 있습니다…</p> : null}
+      {loading && !covers.length ? <p className={styles.detail}>출판용 표지 방향을 설계하고 있습니다…</p> : null}
 
       {covers.length ? (
         <div className={styles.grid}>
-          {covers.slice(0, 3).map((cover) => {
+          {covers.slice(0, 3).map((cover, index) => {
             const concept = normalizeCoverConcept(cover.concept, { title, subtitle, bookType });
             const isSelected = cover.id === selected?.id;
             return (
@@ -103,11 +118,13 @@ export function CoverStudio({ bookId, title, subtitle, bookType, initialCovers =
               >
                 <div className={styles.preview}>
                   <BookCoverArt concept={concept} title={title} subtitle={subtitle} bookType={bookType} />
-                  {isSelected ? <span className={styles.selectedBadge}>SELECTED</span> : null}
+                  <span className={styles.directionIndex}>{String(index + 1).padStart(2, "0")}</span>
+                  {isSelected ? <span className={styles.selectedBadge}>현재 표지</span> : null}
                 </div>
                 <div className={styles.meta}>
                   <strong>{concept.styleLabel}</strong>
-                  <span>{concept.palette.name}</span>
+                  <span>{layoutLabel[concept.layout]} · {finishLabel[concept.finish]}</span>
+                  <small>{concept.palette.name}</small>
                 </div>
               </button>
             );
@@ -117,9 +134,12 @@ export function CoverStudio({ bookId, title, subtitle, bookType, initialCovers =
 
       {covers.length ? (
         <div className={styles.detail}>
-          <strong>{selectedConcept.motifLabel} · {selectedConcept.styleLabel}</strong>
+          <div className={styles.detailHead}>
+            <strong>{selectedConcept.motifLabel} · {selectedConcept.styleLabel}</strong>
+            <span>{layoutLabel[selectedConcept.layout]} / {finishLabel[selectedConcept.finish]}</span>
+          </div>
           <p>{selectedConcept.rationale}</p>
-          <p>피하는 표현: {selectedConcept.avoidCliches.slice(0, 3).join(" · ")}</p>
+          <p className={styles.avoid}>피하는 표현 · {selectedConcept.avoidCliches.slice(0, 3).join(" · ")}</p>
         </div>
       ) : null}
       {error ? <p className={styles.error} role="alert">{error}</p> : null}
