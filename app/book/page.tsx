@@ -66,7 +66,7 @@ export default function BookWorkspacePage() {
           parts(id,title,purpose,position,chapters(id,title,goal,position,status,target_words,word_count,sections(id,title,goal,position,status,target_words,word_count,content_markdown,summary,layout_hint))),
           generation_jobs(id,status,workflow_run_id,created_at),
           book_blueprints(blueprint,version,is_active),
-          book_covers(concept)
+          book_covers(id,concept,is_selected,created_at)
         `).eq("id", id).single();
         if (queryError || !data) throw new Error(queryError?.message ?? "원고를 찾을 수 없습니다.");
         if (active) setBook(data as unknown as Book);
