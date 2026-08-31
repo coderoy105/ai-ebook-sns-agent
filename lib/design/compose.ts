@@ -1,9 +1,11 @@
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { builtInTemplates, chooseLayout } from "./templates";
+import { createCoverConcepts, normalizeCoverConcept } from "./cover-system";
 
 type SectionRow = { id:string; title:string; position:number; content_markdown:string|null };
 type ChapterRow = { id:string; title:string; position:number; sections:SectionRow[] };
 type PartRow = { id:string; title:string; position:number; chapters:ChapterRow[] };
+type CoverRow = { id:string; concept:unknown; is_selected:boolean; created_at:string };
 type PageInsert = {
   book_id:string;
   page_number:number;
@@ -31,10 +33,18 @@ function splitIntoPageChunks(markdown: string, targetWords = 260) {
   return pages;
 }
 
+function activeBlueprintCoreMessage(value: unknown) {
+  const rows = Array.isArray(value) ? value : [];
+  const sorted = [...rows].sort((a, b) => Number((b as { version?: number }).version ?? 0) - Number((a as { version?: number }).version ?? 0));
+  const active = sorted.find((row) => (row as { is_active?: boolean }).is_active !== false) as { blueprint?: unknown } | undefined;
+  const blueprint = active?.blueprint && typeof active.blueprint === "object" ? active.blueprint as Record<string, unknown> : null;
+  return typeof blueprint?.coreMessage === "string" ? blueprint.coreMessage : null;
+}
+
 export async function composeBookPages(bookId: string) {
   const supabase = createServiceSupabase();
   const { data: book, error } = await supabase.from("books")
-    .select("id,title,subtitle,book_type,book_settings(template_id),parts(id,title,position,chapters(id,title,position,sections(id,title,position,content_markdown)))")
+    .select("id,title,subtitle,idea,book_type,book_settings(template_id),book_blueprints(blueprint,version,is_active),book_covers(id,concept,is_selected,created_at),parts(id,title,position,chapters(id,title,position,sections(id,title,position,content_markdown)))")
     .eq("id", bookId).single();
   if (error || !book) throw error ?? new Error("Book not found.");
 
@@ -43,11 +53,31 @@ export async function composeBookPages(bookId: string) {
   const dna = builtInTemplates.find((t) => t.id === templateId) ?? builtInTemplates[0];
   const rows: PageInsert[] = [];
   const parts = (book.parts ?? []) as unknown as PartRow[];
+  const existingCovers = ((book.book_covers ?? []) as unknown as CoverRow[]).sort((a, b) => Number(b.is_selected) - Number(a.is_selected));
+  const hasModernCovers = existingCovers.some((cover) => cover.concept && typeof cover.concept === "object" && (cover.concept as { version?: unknown }).version === 2);
+  const coreMessage = activeBlueprintCoreMessage(book.book_blueprints);
+  const generatedCovers = createCoverConcepts({
+    title: String(book.title),
+    subtitle: book.subtitle ? String(book.subtitle) : null,
+    bookType: book.book_type ? String(book.book_type) : null,
+    idea: book.idea ? String(book.idea) : null,
+    coreMessage,
+    templateMood: dna.mood
+  });
+  const selectedRaw = existingCovers.find((cover) => cover.is_selected)?.concept ?? existingCovers[0]?.concept ?? generatedCovers[0];
+  const selectedCover = normalizeCoverConcept(selectedRaw, {
+    title: String(book.title),
+    subtitle: book.subtitle ? String(book.subtitle) : null,
+    bookType: book.book_type ? String(book.book_type) : null,
+    idea: book.idea ? String(book.idea) : null,
+    coreMessage,
+    templateMood: dna.mood
+  });
   let pageNumber = 1;
 
   rows.push({
     book_id: bookId, page_number: pageNumber++, layout_type: "Cover", template_id: dna.id,
-    content: { title: book.title, subtitle: book.subtitle, designDNA: dna }
+    content: { title: book.title, subtitle: book.subtitle, designDNA: dna, coverConcept: selectedCover }
   });
   rows.push({
     book_id: bookId, page_number: pageNumber++, layout_type: "TableOfContents", template_id: dna.id,
@@ -66,7 +96,7 @@ export async function composeBookPages(bookId: string) {
         content: { partTitle: part.title, chapterTitle: chapter.title }
       });
       for (const section of [...chapter.sections].sort((a,b) => a.position-b.position)) {
-        const chunks = splitIntoPageChunks(section.content_markdown ?? "", book.book_type.includes("소설") ? 310 : 250);
+        const chunks = splitIntoPageChunks(section.content_markdown ?? "", String(book.book_type).includes("소설") ? 310 : 250);
         for (const chunk of chunks) {
           rows.push({
             book_id: bookId, page_number: pageNumber++, layout_type: chooseLayout(chunk), template_id: dna.id,
@@ -82,14 +112,16 @@ export async function composeBookPages(bookId: string) {
     const { error: insertError } = await supabase.from("pages").insert(rows);
     if (insertError) throw insertError;
   }
-  await supabase.from("book_covers").delete().eq("book_id", bookId);
-  await supabase.from("book_covers").insert({
-    book_id: bookId,
-    concept: {
-      title: book.title, subtitle: book.subtitle, templateId: dna.id, mood: dna.mood,
-      palette: dna.colorStrategy, typography: dna.headingStyle, composition: dna.chapterOpeningStyle
-    },
-    is_selected: true
-  });
-  return { pageCount: rows.length, templateId: dna.id };
+
+  if (!hasModernCovers) {
+    await supabase.from("book_covers").delete().eq("book_id", bookId);
+    const { error: coverError } = await supabase.from("book_covers").insert(generatedCovers.map((concept, index) => ({
+      book_id: bookId,
+      concept,
+      is_selected: index === 0
+    })));
+    if (coverError) throw coverError;
+  }
+
+  return { pageCount: rows.length, templateId: dna.id, coverStyle: selectedCover.style };
 }
