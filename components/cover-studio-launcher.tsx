@@ -17,8 +17,6 @@ export function CoverStudioLauncher({ bookId, title, subtitle, bookType, covers 
   const [open, setOpen] = useState(false);
   const selected = useMemo(() => covers.find((cover) => cover.is_selected) ?? covers[0] ?? null, [covers]);
 
-  if (!covers.length) return null;
-
   return (
     <>
       {open ? (
