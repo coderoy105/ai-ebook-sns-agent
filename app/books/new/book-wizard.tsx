@@ -10,6 +10,7 @@ import {
   type CodexDeviceEvent
 } from "@/lib/ai/codex-browser";
 import { ChatGptDeviceCodePanel } from "@/components/chatgpt-device-code-panel";
+import { DraftTitleStudio } from "@/components/draft-title-studio";
 
 const bookTypes = ["AI / 실용서","비즈니스 / 창업","교육용","기술서","미스터리 로맨스","SF 미스터리","에세이","아동용","매뉴얼 / 튜토리얼"];
 const tones = ["친근한 교육형","전문적이지만 읽기 쉬운","차분하고 신뢰감 있는","따뜻하고 감성적인","강렬하고 설득력 있는","대화형","이야기형"];
@@ -30,6 +31,7 @@ const planningCheckpoints = [
 
 type FormState = {
   idea: string;
+  title: string;
   bookType: string;
   audience: string;
   ageGroup: string;
@@ -60,6 +62,7 @@ type DevicePrompt = { verificationUrl: string; userCode: string };
 
 const initial: FormState = {
   idea: "",
+  title: "",
   bookType: "AI / 실용서",
   audience: "처음 이 주제를 배우는 독자",
   ageGroup: "중학생",
@@ -300,11 +303,23 @@ export function BookWizard() {
       if (!response.ok) throw new Error(payload.error ?? "책 프로젝트 생성에 실패했습니다.");
       if (!payload.bookId) throw new Error("생성된 책 프로젝트 ID를 받지 못했습니다.");
 
+      let titleWarning = "";
+      if (form.title.trim()) {
+        const titleResponse = await fetch(`/api/books/${payload.bookId}/title`, {
+          method: "PATCH",
+          credentials: "same-origin",
+          cache: "no-store",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ title: form.title.trim() })
+        });
+        if (!titleResponse.ok) titleWarning = "선택한 제목 저장이 지연됐습니다. 작업실의 ‘제목 정하기’에서 바로 다시 저장할 수 있습니다.";
+      }
+
       setPlanningProgress({
         percent: 85,
         phase: "waiting",
         label: "백그라운드 작업 등록 완료",
-        detail: `${selectedLabel}가 서버에서 Book Blueprint와 전체 목차 생성을 계속합니다. 브라우저를 닫아도 됩니다.`,
+        detail: titleWarning || `${selectedLabel}가 서버에서 Book Blueprint와 전체 목차 생성을 계속합니다. 브라우저를 닫아도 됩니다.`,
         elapsedSeconds: 0
       });
 
@@ -314,7 +329,7 @@ export function BookWizard() {
         percent: 100,
         phase: "done",
         label: "작업실에서 계속 확인할 수 있습니다",
-        detail: "작업실을 여는 중입니다. 진행률과 현재 상태는 서버에서 다시 불러옵니다.",
+        detail: titleWarning || "작업실을 여는 중입니다. 진행률과 현재 상태는 서버에서 다시 불러옵니다.",
         elapsedSeconds: 0
       });
 
@@ -385,7 +400,7 @@ export function BookWizard() {
         <div className="wizard-workspace">
           {step === 0 && (
             <div className="wizard-section">
-              <p className="wizard-lead">한 문장만 적어도 됩니다. 여기서 입력한 의도를 바탕으로 제목, 독자, 목차와 분량을 확장합니다.</p>
+              <p className="wizard-lead">한 문장만 적어도 됩니다. 아이디어를 적은 뒤 제목을 직접 정하거나 AI에게 후보를 추천받을 수 있습니다.</p>
               <div className="idea-field">
                 <textarea aria-label="책 아이디어" value={form.idea} onChange={(event) => update("idea", event.target.value)} placeholder="예: 중학생이 생성형 AI를 처음 이해할 수 있도록 사례 중심의 입문서를 만들어줘." />
                 <span>{form.idea.trim().length} chars</span>
@@ -394,6 +409,17 @@ export function BookWizard() {
                 <span>바로 시작하기</span>
                 <div>{["고등학생을 위한 ChatGPT 공부법","AI 시대 1인 창업 가이드","20대 여성을 위한 미스터리 로맨스"].map((idea) => <button key={idea} onClick={() => update("idea", idea)}>{idea}</button>)}</div>
               </div>
+              <DraftTitleStudio
+                value={form.title}
+                onChange={(title) => update("title", title)}
+                idea={form.idea}
+                bookType={form.bookType}
+                audience={form.audience}
+                ageGroup={form.ageGroup}
+                tone={form.tone}
+                aiProvider={form.aiProvider}
+                onConnect={connectSelectedProvider}
+              />
             </div>
           )}
 
@@ -477,6 +503,7 @@ export function BookWizard() {
 
               <div className="review-list">
                 <p><b>AI 모델</b><span>{selectedLabel}</span></p>
+                <p><b>제목</b><span>{form.title.trim() || "AI가 Book Blueprint에서 최종 제목 결정"}</span></p>
                 <p><b>아이디어</b><span>{form.idea}</span></p>
                 <p><b>책 종류</b><span>{form.bookType}</span></p>
                 <p><b>독자</b><span>{form.ageGroup} · {form.knowledgeLevel} · {form.audience}</span></p>
