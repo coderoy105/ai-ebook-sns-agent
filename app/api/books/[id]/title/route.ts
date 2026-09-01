@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import { start } from "workflow/api";
 import { z } from "zod";
 import { requireUser, createServiceSupabase } from "@/lib/supabase/server";
 import { assertRateLimit } from "@/lib/security/rate-limit";
+import { applyTitleOverrideWorkflow } from "@/lib/jobs/title-override-workflow";
 import {
   backgroundProviderLabel,
   generateBackgroundStructured,
@@ -74,7 +76,7 @@ async function saveOpenRouterKeyFromRequest(request: Request, userId: string) {
 async function loadOwnedBook(bookId: string, userId: string) {
   const { supabase } = await requireUser();
   const { data, error } = await supabase.from("books")
-    .select("id,title,subtitle,idea,book_type,user_id,book_settings(planning_input),book_blueprints(id,blueprint,is_active,version)")
+    .select("id,title,subtitle,idea,book_type,status,user_id,book_settings(planning_input),book_blueprints(id,blueprint,is_active,version)")
     .eq("id", bookId)
     .eq("user_id", userId)
     .single();
@@ -117,7 +119,7 @@ function titlePrompt(book: {
     "다섯 제목은 서로 전략이 달라야 합니다: 명료형, 호기심형, 개념형, 감성형, 강한 상업형을 적절히 섞으세요.",
     "제목만 보고 주제와 독자가 어느 정도 느껴져야 하지만 설명문처럼 길어서는 안 됩니다.",
     "AI가 흔히 만드는 '완벽 가이드', '모든 것', '새로운 시대' 같은 상투어와 과장된 클릭베이트를 피하세요.",
-    "current title과 거의 같은 표현을 반복하지 마세요. 각 제안에 짧은 전략명(angle)과 추천 이유(reason)를 함께 작성하세요."
+    "현재 제목과 거의 같은 표현을 반복하지 마세요. 각 제안에 짧은 전략명(angle)과 추천 이유(reason)를 함께 작성하세요."
   ].join("\n");
 }
 
@@ -173,7 +175,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const { title } = TitleUpdateSchema.parse(await request.json());
 
     const { data: book, error: bookError } = await supabase.from("books")
-      .select("id,title,book_settings(planning_input),book_blueprints(id,blueprint,is_active,version)")
+      .select("id,title,status,book_settings(planning_input),book_blueprints(id,blueprint,is_active,version)")
       .eq("id", id)
       .eq("user_id", user.id)
       .single();
@@ -212,7 +214,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       await supabase.from("pages").update({ content: { ...(coverPage.content as Record<string, unknown>), title } }).eq("id", coverPage.id);
     }
 
-    return NextResponse.json({ ok: true, title, updatedAt: now }, { headers: { "cache-control": "no-store" } });
+    let overrideRunId: string | null = null;
+    if (book.status === "PLANNING") {
+      const run = await start(applyTitleOverrideWorkflow, [{ bookId: id, userId: user.id }]);
+      overrideRunId = run.runId;
+    }
+
+    return NextResponse.json({ ok: true, title, updatedAt: now, overrideRunId }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     if (error instanceof z.ZodError) return jsonError(error.issues[0]?.message ?? "올바른 제목을 입력해 주세요.");
     const message = error instanceof Error ? error.message : "TITLE_UPDATE_FAILED";
