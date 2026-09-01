@@ -1,0 +1,130 @@
+.launcher {
+  position: fixed;
+  z-index: 72;
+  right: 166px;
+  bottom: 18px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 48px;
+  padding: 6px 12px 6px 7px;
+  border: 1px solid #d7dad2;
+  border-radius: 12px;
+  background: #fff;
+  color: #1b1d18;
+  box-shadow: 0 12px 36px rgba(24,26,21,.12);
+  text-align: left;
+}
+
+.launcher > span:last-child { display: grid; gap: 1px; }
+.launcher small { font-size: 7px; letter-spacing: .11em; color: #8a8e86; }
+.launcher strong { font-size: 11px; font-weight: 760; }
+
+.mark {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: #171914;
+  color: #f6f5ef;
+  font: 700 17px/1 Georgia, serif;
+}
+
+.drawer {
+  position: fixed;
+  z-index: 74;
+  right: 18px;
+  bottom: 76px;
+  width: min(470px, calc(100vw - 36px));
+  max-height: min(790px, calc(100dvh - 100px));
+  overflow: auto;
+  padding: 20px;
+  border: 1px solid #d7dad2;
+  border-radius: 18px;
+  background: #fbfbf8;
+  color: #171914;
+  box-shadow: 0 28px 80px rgba(24,26,21,.22);
+}
+
+.drawerHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #e1e3dc;
+}
+
+.drawerHead > div { display: grid; gap: 3px; }
+.drawerHead span { font-size: 8px; letter-spacing: .14em; color: #8a8e86; }
+.drawerHead strong { font-size: 16px; letter-spacing: -.03em; }
+.drawerHead button { border: 0; background: transparent; color: #6f746b; font-size: 11px; }
+
+.field { display: grid; gap: 7px; }
+.field label { font-size: 11px; font-weight: 760; }
+.field textarea {
+  min-height: 86px;
+  resize: vertical;
+  width: 100%;
+  padding: 14px 15px;
+  border: 1px solid #cfd3ca;
+  border-radius: 12px;
+  background: #fff;
+  color: #171914;
+  font: 760 20px/1.25 Georgia, "Noto Serif KR", serif;
+  letter-spacing: -.035em;
+  outline: none;
+}
+.field textarea:focus { border-color: #6576cf; box-shadow: 0 0 0 3px rgba(72,91,204,.1); }
+
+.fieldMeta { display: flex; justify-content: space-between; gap: 12px; color: #858a81; font-size: 9px; line-height: 1.45; }
+.fieldMeta b { flex: 0 0 auto; color: #5d6259; font-weight: 650; }
+
+.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 15px; }
+.actions button { min-height: 42px; border-radius: 10px; padding: 0 12px; font-size: 11px; font-weight: 740; }
+.actions button:disabled { opacity: .48; }
+.aiButton { border: 1px solid #cdd1c8; background: #fff; color: #282b25; }
+.saveButton { border: 1px solid #171914; background: #171914; color: #fff; }
+
+.suggestions { display: grid; gap: 7px; margin-top: 20px; padding-top: 17px; border-top: 1px solid #e1e3dc; }
+.suggestionHead { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 3px; }
+.suggestionHead strong { font-size: 11px; }
+.suggestionHead span { font-size: 8px; color: #8a8e86; }
+
+.suggestion {
+  display: grid;
+  grid-template-columns: 27px minmax(0,1fr) auto;
+  align-items: start;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 11px;
+  border: 1px solid #e0e2dc;
+  border-radius: 11px;
+  background: #fff;
+  color: inherit;
+  text-align: left;
+}
+.suggestion:hover { border-color: #b8beb2; }
+.suggestion.selected { border-color: #485bcc; box-shadow: inset 3px 0 0 #485bcc; }
+.index { padding-top: 1px; color: #9a9e96; font: 700 9px/1.3 ui-monospace, monospace; }
+.suggestion div { min-width: 0; }
+.suggestion small { display: block; margin-bottom: 4px; color: #6d7468; font-size: 8px; letter-spacing: .04em; }
+.suggestion strong { display: block; font-family: Georgia, "Noto Serif KR", serif; font-size: 15px; line-height: 1.28; letter-spacing: -.025em; }
+.suggestion p { margin: 5px 0 0; color: #757a72; font-size: 9px; line-height: 1.5; }
+.pick { align-self: center; padding: 5px 7px; border-radius: 999px; background: #f1f2ee; color: #60655d; font-size: 8px; white-space: nowrap; }
+.selected .pick { background: #e9ecff; color: #3548b7; }
+
+.message, .error { margin: 12px 0 0; padding: 10px 11px; border-radius: 9px; font-size: 9px; line-height: 1.5; }
+.message { background: #f1f3ec; color: #4f574b; }
+.error { background: #fff0ee; color: #a63b31; }
+
+@media (max-width: 760px) {
+  .launcher { right: 12px; bottom: calc(132px + env(safe-area-inset-bottom)); }
+  .drawer { right: 10px; bottom: calc(190px + env(safe-area-inset-bottom)); width: calc(100vw - 20px); max-height: calc(100dvh - 220px); padding: 16px; }
+  .field textarea { min-height: 78px; font-size: 18px; }
+  .actions { grid-template-columns: 1fr; }
+  .suggestion { grid-template-columns: 24px minmax(0,1fr); }
+  .pick { grid-column: 2; justify-self: start; }
+}
