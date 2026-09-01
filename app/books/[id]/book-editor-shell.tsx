@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { beginFreeAiConnect, consumeFreeAiJustConnected, getFreeAiKey } from "@/lib/ai/openrouter-browser";
 import { CoverStudioLauncher } from "@/components/cover-studio-launcher";
+import { TitleStudioLauncher } from "@/components/title-studio-launcher";
 import type { CoverRow } from "@/components/cover-studio";
 import { BookEditor, type Book } from "./book-editor";
 
@@ -59,6 +60,7 @@ function ManuscriptWorkspace({initialBook}:{initialBook:Book}) {
   const covers=(initialBook.book_covers??[]) as CoverRow[];
   return <>
     <BookEditor initialBook={initialBook}/>
+    <TitleStudioLauncher bookId={initialBook.id} title={initialBook.title}/>
     <CoverStudioLauncher bookId={initialBook.id} title={initialBook.title} subtitle={initialBook.subtitle} bookType={initialBook.book_type} covers={covers}/>
   </>;
 }
