@@ -1,0 +1,90 @@
+.studio {
+  display: grid;
+  gap: 12px;
+  margin-top: 22px;
+  padding: 18px;
+  border: 1px solid var(--line, #e0e2dc);
+  border-radius: 16px;
+  background: #f8f8f4;
+}
+
+.heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.heading > div { display: grid; gap: 4px; }
+.heading span { color: #8a8e86; font-size: 8px; letter-spacing: .13em; }
+.heading strong { max-width: 34ch; font-size: 14px; line-height: 1.35; letter-spacing: -.025em; }
+.heading button {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 0 11px;
+  border: 1px solid #cfd3ca;
+  border-radius: 9px;
+  background: #fff;
+  color: #272a24;
+  font-size: 9px;
+  font-weight: 720;
+}
+.heading button:disabled { opacity: .45; }
+
+.field { display: grid; gap: 6px; }
+.field input {
+  width: 100%;
+  min-height: 52px;
+  padding: 0 14px;
+  border: 1px solid #cdd1c7;
+  border-radius: 11px;
+  background: #fff;
+  color: #171914;
+  font: 700 17px/1.25 Georgia, "Noto Serif KR", serif;
+  letter-spacing: -.025em;
+  outline: none;
+}
+.field input:focus { border-color: #6576cf; box-shadow: 0 0 0 3px rgba(72,91,204,.09); }
+.field > div { display: flex; justify-content: space-between; gap: 12px; color: #858a81; font-size: 8px; }
+.field b { color: #60655d; font-weight: 650; }
+
+.suggestions { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 7px; }
+.suggestions > button {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  min-width: 0;
+  min-height: 145px;
+  padding: 10px;
+  border: 1px solid #dde0d8;
+  border-radius: 11px;
+  background: #fff;
+  color: inherit;
+  text-align: left;
+}
+.suggestions > button:hover { border-color: #b7bdb1; }
+.suggestions > button.selected { border-color: #485bcc; box-shadow: inset 0 -3px 0 #485bcc; }
+.suggestions > button > span { color: #9b9f97; font: 700 8px/1 ui-monospace, monospace; }
+.suggestions small { display: block; margin: 9px 0 4px; color: #747970; font-size: 7px; letter-spacing: .04em; }
+.suggestions strong { display: block; font-family: Georgia, "Noto Serif KR", serif; font-size: 12px; line-height: 1.3; letter-spacing: -.025em; }
+.suggestions p { margin: 6px 0 0; color: #858a81; font-size: 7px; line-height: 1.45; }
+.suggestions i { align-self: end; margin-top: 8px; color: #6d7269; font-size: 7px; font-style: normal; }
+.selected i { color: #3449b7; font-weight: 700; }
+
+.note, .error { margin: 0; padding-top: 2px; font-size: 8px; line-height: 1.5; }
+.note { color: #687064; }
+.error { color: #b13a30; }
+
+@media (max-width: 900px) {
+  .suggestions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .suggestions > button { min-height: 128px; }
+}
+
+@media (max-width: 640px) {
+  .studio { margin-top: 16px; padding: 14px; }
+  .heading { display: grid; }
+  .heading button { justify-self: start; }
+  .field input { font-size: 15px; }
+  .suggestions { grid-template-columns: 1fr; }
+  .suggestions > button { min-height: auto; grid-template-columns: 24px minmax(0,1fr) auto; grid-template-rows: auto; gap: 8px; }
+  .suggestions small { margin-top: 0; }
+  .suggestions i { align-self: center; }
+}
