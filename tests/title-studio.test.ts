@@ -6,6 +6,7 @@ const routeSource = readFileSync(new URL("../app/api/books/[id]/title/route.ts",
 const draftRouteSource = readFileSync(new URL("../app/api/title-suggestions/route.ts", import.meta.url), "utf8");
 const launcherSource = readFileSync(new URL("../components/title-studio-launcher.tsx", import.meta.url), "utf8");
 const draftStudioSource = readFileSync(new URL("../components/draft-title-studio.tsx", import.meta.url), "utf8");
+const wizardSource = readFileSync(new URL("../app/books/new/book-wizard.tsx", import.meta.url), "utf8");
 const shellSource = readFileSync(new URL("../app/books/[id]/book-editor-shell.tsx", import.meta.url), "utf8");
 const workspaceSource = readFileSync(new URL("../app/book/page.tsx", import.meta.url), "utf8");
 const overrideWorkflowSource = readFileSync(new URL("../lib/jobs/title-override-workflow.ts", import.meta.url), "utf8");
@@ -52,10 +53,14 @@ test("title studio supports direct editing, AI recommendations and explicit save
   assert.match(launcherSource, /method: "PATCH"/);
 });
 
-test("draft title component supports optional direct title and AI recommendations", () => {
+test("new book wizard supports optional direct title and AI recommendations before creation", () => {
   assert.match(draftStudioSource, /비워두면 AI가 Blueprint에서 최종 제목/);
   assert.match(draftStudioSource, /AI 제목 5개 추천/);
   assert.match(draftStudioSource, /\/api\/title-suggestions/);
+  assert.match(wizardSource, /DraftTitleStudio/);
+  assert.match(wizardSource, /title: ""/);
+  assert.match(wizardSource, /\/api\/books\/\$\{payload\.bookId\}\/title/);
+  assert.match(wizardSource, /AI가 Book Blueprint에서 최종 제목 결정/);
 });
 
 test("title studio is available after creation, including while Blueprint is planning", () => {
