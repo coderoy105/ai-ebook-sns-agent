@@ -173,11 +173,18 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const { title } = TitleUpdateSchema.parse(await request.json());
 
     const { data: book, error: bookError } = await supabase.from("books")
-      .select("id,title,book_blueprints(id,blueprint,is_active,version)")
+      .select("id,title,book_settings(planning_input),book_blueprints(id,blueprint,is_active,version)")
       .eq("id", id)
       .eq("user_id", user.id)
       .single();
     if (bookError || !book) return jsonError("Book not found", 404);
+
+    const settings = firstRelation(book.book_settings as Relation<BookSettings>);
+    const planningInput = settings?.planning_input && typeof settings.planning_input === "object" ? settings.planning_input : {};
+    const { error: settingsError } = await supabase.from("book_settings")
+      .update({ planning_input: { ...planningInput, titleOverride: title, titleSource: "user-confirmed" } })
+      .eq("book_id", id);
+    if (settingsError) throw settingsError;
 
     const now = new Date().toISOString();
     const { error: updateError } = await supabase.from("books")
