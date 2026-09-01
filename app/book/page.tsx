@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ProductMark } from "@/components/product-mark";
+import { TitleStudioLauncher } from "@/components/title-studio-launcher";
 import { createClient } from "@/lib/supabase/client";
 import { BookEditorShell } from "@/app/books/[id]/book-editor-shell";
 import { GenerationProgress } from "@/app/books/[id]/generation-progress";
@@ -94,8 +95,10 @@ export default function BookWorkspacePage() {
     );
   }
 
+  const planningOnly = book.parts.length === 0 && ["PLANNING", "FAILED"].includes(book.status);
   return <>
     <BookEditorShell initialBook={book} />
+    {planningOnly ? <TitleStudioLauncher bookId={book.id} title={book.title} /> : null}
     <GenerationProgress bookId={bookId} />
   </>;
 }
