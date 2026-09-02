@@ -4,20 +4,33 @@ import test from "node:test";
 
 const workflowSource = readFileSync(new URL("../lib/jobs/book-autopilot-workflow.ts", import.meta.url), "utf8");
 const starterSource = readFileSync(new URL("../lib/jobs/auto-book-generation.ts", import.meta.url), "utf8");
+const registrationSource = readFileSync(new URL("../lib/jobs/register-book-autopilot.ts", import.meta.url), "utf8");
 const routeSource = readFileSync(new URL("../app/api/books/[id]/autopilot/route.ts", import.meta.url), "utf8");
+const createRouteSource = readFileSync(new URL("../app/api/books/route.ts", import.meta.url), "utf8");
 const progressSource = readFileSync(new URL("../app/books/[id]/generation-progress.tsx", import.meta.url), "utf8");
 
-test("workspace registers a durable server autopilot and retries registration while online", () => {
+test("book create request registers autopilot on the server before returning to the phone", () => {
+  assert.match(createRouteSource, /corePost/);
+  assert.match(createRouteSource, /registerBookAutopilot\(bookId, user\.id\)/);
+  assert.match(createRouteSource, /autopilotRegistered: true/);
+  assert.match(createRouteSource, /phoneOffSafe: true/);
+  assert.match(createRouteSource, /autopilotRetryRequired: true/);
+});
+
+test("workspace also retries durable autopilot registration as a fallback", () => {
   assert.match(progressSource, /\/api\/books\/\$\{bookId\}\/autopilot/);
   assert.match(progressSource, /method: "POST"/);
   assert.match(progressSource, /setTimeout\(\(\) => \{ void registerAutopilot\(\); \}, 5000\)/);
+  assert.match(progressSource, /서버 자동 실행/);
+  assert.match(progressSource, /서버 등록 재시도 중/);
 });
 
-test("autopilot endpoint is idempotent and starts a Vercel Workflow", () => {
-  assert.match(routeSource, /start\(completeBookAutopilotWorkflow/);
-  assert.match(routeSource, /autopilotRunId/);
-  assert.match(routeSource, /reused: true/);
-  assert.match(routeSource, /background: true/);
+test("autopilot registration is idempotent and starts one durable Vercel Workflow", () => {
+  assert.match(registrationSource, /start\(completeBookAutopilotWorkflow/);
+  assert.match(registrationSource, /autopilotRunId/);
+  assert.match(registrationSource, /reused: true/);
+  assert.match(registrationSource, /background: true/);
+  assert.match(routeSource, /registerBookAutopilot/);
 });
 
 test("autopilot waits durably for Blueprint and hands off to manuscript generation", () => {
