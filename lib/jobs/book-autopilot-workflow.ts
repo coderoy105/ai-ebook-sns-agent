@@ -95,9 +95,9 @@ async function autopilotStep(request: AutopilotStepRequest): Promise<AutopilotSt
 
 async function inspectBook(input: AutopilotInput): Promise<InspectResult> {
   const supabase = createServiceSupabase();
-  const [{ data: book, error: bookError }, { count: sectionCount, error: sectionError }, { data: jobs, error: jobsError }, { data: settingsRows, error: settingsError }] = await Promise.all([
+  const [{ data: book, error: bookError }, { data: sectionRows, error: sectionError }, { data: jobs, error: jobsError }, { data: settingsRows, error: settingsError }] = await Promise.all([
     supabase.from("books").select("id,status").eq("id", input.bookId).eq("user_id", input.userId).single(),
-    supabase.from("sections").select("id", { count: "exact", head: true }).eq("book_id", input.bookId),
+    supabase.from("sections").select("id").eq("book_id", input.bookId),
     supabase.from("generation_jobs").select("id,status,workflow_run_id,failure_reason,created_at").eq("book_id", input.bookId).eq("user_id", input.userId).order("created_at", { ascending: false }).limit(2),
     supabase.from("book_settings").select("planning_input").eq("book_id", input.bookId).limit(1)
   ]);
@@ -106,6 +106,7 @@ async function inspectBook(input: AutopilotInput): Promise<InspectResult> {
   if (jobsError) throw new Error(jobsError.message);
   if (settingsError) throw new Error(settingsError.message);
 
+  const sectionCount = Array.isArray(sectionRows) ? sectionRows.length : 0;
   const planningInput = settingsRows?.[0]?.planning_input && typeof settingsRows[0].planning_input === "object"
     ? settingsRows[0].planning_input as Record<string, unknown>
     : {};
@@ -118,7 +119,7 @@ async function inspectBook(input: AutopilotInput): Promise<InspectResult> {
     return { state: "completed", provider, planningJobId: latestJob?.id ?? null, waitFor: "30s", reason: "" };
   }
 
-  if (status === "GENERATING" || ["GENERATING", "QUEUED"].includes(latestStatus) && Number(sectionCount ?? 0) > 0) {
+  if (status === "GENERATING" || (["GENERATING", "QUEUED"].includes(latestStatus) && sectionCount > 0)) {
     return { state: "handed-off", provider, planningJobId: latestJob?.id ?? null, waitFor: "30s", reason: "" };
   }
 
@@ -134,7 +135,7 @@ async function inspectBook(input: AutopilotInput): Promise<InspectResult> {
     return { state: "intervention", provider, planningJobId: latestJob?.id ?? null, waitFor: "30s", reason: "사용자가 책 생성을 취소했습니다." };
   }
 
-  if ((status === "DRAFT" || status === "PAUSED") && Number(sectionCount ?? 0) > 0) {
+  if ((status === "DRAFT" || status === "PAUSED") && sectionCount > 0) {
     return { state: "start", provider, planningJobId: latestJob?.id ?? null, waitFor: "15s", reason: "" };
   }
 
