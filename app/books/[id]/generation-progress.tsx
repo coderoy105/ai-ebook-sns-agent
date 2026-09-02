@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type ProgressDetails = {
   completedSections: number;
@@ -38,6 +38,7 @@ function statusLabel(status: string) {
 
 export function GenerationProgress({ bookId }: { bookId: string }) {
   const [state, setState] = useState<ProgressState | null>(null);
+  const autopilotRegistered = useRef(false);
 
   const refresh = useCallback(async () => {
     const response = await fetch(`/api/books/${bookId}/status`, { cache: "no-store" });
@@ -48,6 +49,36 @@ export function GenerationProgress({ bookId }: { bookId: string }) {
       progress: Math.max(0, Math.min(100, Number(data.book?.progress ?? 0))),
       details: data.progressDetails ?? emptyDetails
     });
+  }, [bookId]);
+
+  useEffect(() => {
+    let active = true;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const registerAutopilot = async () => {
+      if (!active || autopilotRegistered.current) return;
+      try {
+        const response = await fetch(`/api/books/${bookId}/autopilot`, {
+          method: "POST",
+          credentials: "same-origin",
+          cache: "no-store"
+        });
+        if (response.ok) {
+          autopilotRegistered.current = true;
+          return;
+        }
+      } catch {
+        // Retry while this page is available. Once registration succeeds the
+        // server Workflow no longer depends on this browser or phone.
+      }
+      if (active) retryTimer = setTimeout(() => { void registerAutopilot(); }, 5000);
+    };
+
+    void registerAutopilot();
+    return () => {
+      active = false;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
   }, [bookId]);
 
   useEffect(() => {
