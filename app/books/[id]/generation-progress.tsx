@@ -17,6 +17,8 @@ type ProgressState = {
   details: ProgressDetails;
 };
 
+type AutopilotState = "registering" | "ready" | "retrying";
+
 const emptyDetails: ProgressDetails = {
   completedSections: 0,
   totalSections: 0,
@@ -38,6 +40,7 @@ function statusLabel(status: string) {
 
 export function GenerationProgress({ bookId }: { bookId: string }) {
   const [state, setState] = useState<ProgressState | null>(null);
+  const [autopilotState, setAutopilotState] = useState<AutopilotState>("registering");
   const autopilotRegistered = useRef(false);
 
   const refresh = useCallback(async () => {
@@ -65,13 +68,17 @@ export function GenerationProgress({ bookId }: { bookId: string }) {
         });
         if (response.ok) {
           autopilotRegistered.current = true;
+          if (active) setAutopilotState("ready");
           return;
         }
       } catch {
         // Retry while this page is available. Once registration succeeds the
         // server Workflow no longer depends on this browser or phone.
       }
-      if (active) retryTimer = setTimeout(() => { void registerAutopilot(); }, 5000);
+      if (active) {
+        setAutopilotState("retrying");
+        retryTimer = setTimeout(() => { void registerAutopilot(); }, 5000);
+      }
     };
 
     void registerAutopilot();
@@ -107,6 +114,7 @@ export function GenerationProgress({ bookId }: { bookId: string }) {
   const wordText = details.targetWords > 0
     ? `${details.generatedWords.toLocaleString("ko-KR")} / ${details.targetWords.toLocaleString("ko-KR")} words`
     : `${details.generatedWords.toLocaleString("ko-KR")} words`;
+  const autopilotText = autopilotState === "ready" ? "서버 자동 실행" : autopilotState === "retrying" ? "서버 등록 재시도 중" : "서버 등록 중";
 
   return (
     <section className={`generation-dock dock-${state.status.toLowerCase()}`} aria-live="polite" aria-label="책 생성 진행률">
@@ -114,7 +122,7 @@ export function GenerationProgress({ bookId }: { bookId: string }) {
         <div className="dock-progress-number"><strong>{Math.round(state.progress)}</strong><span>%</span></div>
         <div className="dock-copy">
           <strong>{statusLabel(state.status)}</strong>
-          <span>{sectionText} · {wordText}</span>
+          <span>{sectionText} · {wordText} · {autopilotText}</span>
         </div>
         {currentPath && state.status !== "COMPLETED" && <div className="dock-current"><span>현재 작업</span><strong>{currentPath}</strong></div>}
       </div>
