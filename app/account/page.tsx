@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
+import { requestPasswordResetEmail } from "@/lib/auth/password-recovery";
 import { createClient } from "@/lib/supabase/client";
 import { userFacingAuthError } from "@/lib/auth/user-facing-errors";
 import styles from "./account.module.css";
@@ -28,6 +29,33 @@ export default function AccountPage() {
   useEffect(() => {
     let active = true;
     void (async () => {
+      if (recoveryMode && typeof window !== "undefined" && window.location.hash) {
+        const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+        const accessToken = hashParams.get("access_token");
+        const refreshToken = hashParams.get("refresh_token");
+        const recoveryError = hashParams.get("error_description") ?? hashParams.get("error");
+
+        if (recoveryError) {
+          if (active) {
+            setNotice({ kind: "error", text: "재설정 링크가 만료되었거나 사용할 수 없습니다. 로그인 화면에서 새 재설정 메일을 받아 다시 시도해 주세요." });
+          }
+          return;
+        }
+
+        if (accessToken && refreshToken) {
+          const { error: sessionError } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken
+          });
+          if (!active) return;
+          if (sessionError) {
+            setNotice({ kind: "error", text: "재설정 세션을 시작하지 못했습니다. 로그인 화면에서 새 재설정 메일을 받아 다시 시도해 주세요." });
+            return;
+          }
+          window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+        }
+      }
+
       if (recoveryMode && authCode) {
         const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(
           authCode,
@@ -37,7 +65,7 @@ export default function AccountPage() {
         if (exchangeError) {
           setNotice({
             kind: "error",
-            text: "재설정 링크의 인증을 완료하지 못했습니다. 링크가 만료되었거나 다른 브라우저에서 요청한 링크일 수 있습니다. 로그인 화면에서 새 재설정 메일을 받아 다시 시도해 주세요."
+            text: "이전 방식의 재설정 링크 인증을 완료하지 못했습니다. 로그인 화면에서 새 재설정 메일을 받아 다시 시도해 주세요."
           });
           return;
         }
@@ -50,7 +78,7 @@ export default function AccountPage() {
         if (recoveryMode) {
           setNotice({
             kind: "error",
-            text: "재설정 세션을 확인하지 못했습니다. 로그인 화면에서 새 재설정 메일을 받아 같은 브라우저에서 링크를 열어 주세요."
+            text: "재설정 세션을 확인하지 못했습니다. 로그인 화면에서 새 재설정 메일을 받아 다시 시도해 주세요."
           });
           return;
         }
@@ -120,9 +148,10 @@ export default function AccountPage() {
     setResetLoading(true);
     setNotice(null);
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/account?recovery=1`
-      });
+      const { error } = await requestPasswordResetEmail(
+        email,
+        `${window.location.origin}/account?recovery=1`
+      );
       if (error) throw error;
       setNotice({ kind: "info", text: "비밀번호 재설정 메일을 보냈습니다. 메일의 링크를 열면 새 비밀번호를 설정할 수 있습니다." });
     } catch (error) {
