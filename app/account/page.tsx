@@ -147,7 +147,7 @@ export default function AccountPage() {
               {!recoveryMode ? (
                 <div className="field">
                   <label htmlFor="current-password">현재 비밀번호</label>
-                  <input id="current-password" type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" minLength={8} maxLength={128} required />
+                  <input id="current-password" type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" minLength={6} maxLength={128} required />
                 </div>
               ) : null}
               <div className="field">
