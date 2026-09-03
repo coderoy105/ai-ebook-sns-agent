@@ -25,3 +25,24 @@ jobs:
       - run: npm run worker:check
       - run: docker build -t ai-book-studio-codex-worker:ci services/codex-worker
       - run: npm run build
+      - name: Package verified deployment source
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-production-source
+          path: |
+            .env.example
+            app
+            components
+            lib
+            services
+            supabase
+            types
+            next.config.ts
+            package.json
+            postcss.config.mjs
+            proxy.ts
+            tsconfig.json
+            vercel.json
+          if-no-files-found: error
+          retention-days: 3
