@@ -61,7 +61,7 @@ function ManuscriptWorkspace({initialBook}:{initialBook:Book}) {
   const covers=(initialBook.book_covers??[]) as CoverRow[];
   return <>
     <BookEditor initialBook={initialBook}/>
-    <BookReaderLauncher bookId={initialBook.id} completed={initialBook.status==="COMPLETED"}/>
+    {initialBook.status==="COMPLETED" ? <BookReaderLauncher bookId={initialBook.id} completed /> : null}
     <TitleStudioLauncher bookId={initialBook.id} title={initialBook.title}/>
     <CoverStudioLauncher bookId={initialBook.id} title={initialBook.title} subtitle={initialBook.subtitle} bookType={initialBook.book_type} covers={covers}/>
   </>;
