@@ -13,6 +13,8 @@ export default function AccountPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const recoveryMode = searchParams.get("recovery") === "1";
+  const authCode = searchParams.get("code");
+  const flowId = searchParams.get("sb_flow_id");
   const supabase = useMemo(() => createClient(), []);
   const [email, setEmail] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
@@ -21,21 +23,47 @@ export default function AccountPage() {
   const [loading, setLoading] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
-  const [notice, setNotice] = useState<Notice>(recoveryMode ? { kind: "info", text: "비밀번호 재설정 링크로 들어왔습니다. 새 비밀번호를 입력해 저장해 주세요." } : null);
+  const [notice, setNotice] = useState<Notice>(recoveryMode ? { kind: "info", text: "비밀번호 재설정 링크를 확인하고 있습니다." } : null);
 
   useEffect(() => {
     let active = true;
     void (async () => {
+      if (recoveryMode && authCode) {
+        const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(
+          authCode,
+          flowId ? { flowId } : undefined
+        );
+        if (!active) return;
+        if (exchangeError) {
+          setNotice({
+            kind: "error",
+            text: "재설정 링크의 인증을 완료하지 못했습니다. 링크가 만료되었거나 다른 브라우저에서 요청한 링크일 수 있습니다. 로그인 화면에서 새 재설정 메일을 받아 다시 시도해 주세요."
+          });
+          return;
+        }
+        router.replace("/account?recovery=1");
+      }
+
       const { data, error } = await supabase.auth.getUser();
       if (!active) return;
       if (error || !data.user) {
+        if (recoveryMode) {
+          setNotice({
+            kind: "error",
+            text: "재설정 세션을 확인하지 못했습니다. 로그인 화면에서 새 재설정 메일을 받아 같은 브라우저에서 링크를 열어 주세요."
+          });
+          return;
+        }
         router.replace("/login?next=/account");
         return;
       }
       setEmail(data.user.email ?? "");
+      if (recoveryMode) {
+        setNotice({ kind: "info", text: "인증이 완료되었습니다. 아래에 새 비밀번호를 입력해 저장해 주세요." });
+      }
     })();
     return () => { active = false; };
-  }, [router, supabase]);
+  }, [authCode, flowId, recoveryMode, router, supabase]);
 
   async function changePassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -152,16 +180,16 @@ export default function AccountPage() {
               ) : null}
               <div className="field">
                 <label htmlFor="new-password">새 비밀번호</label>
-                <input id="new-password" type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={128} required />
+                <input id="new-password" type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={128} required disabled={recoveryMode && !email} />
                 <small>8자 이상 입력해 주세요.</small>
               </div>
               <div className="field">
                 <label htmlFor="confirm-password">새 비밀번호 확인</label>
-                <input id="confirm-password" type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={128} required />
+                <input id="confirm-password" type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={128} required disabled={recoveryMode && !email} />
               </div>
 
               <div className={styles.actions}>
-                <button type="submit" className="button button-primary" disabled={loading || (!recoveryMode && !currentPassword) || newPassword.length < 8 || confirmPassword.length < 8}>
+                <button type="submit" className="button button-primary" disabled={loading || (!recoveryMode && !currentPassword) || (recoveryMode && !email) || newPassword.length < 8 || confirmPassword.length < 8}>
                   {loading ? <><span className="button-spinner" aria-hidden="true" /> 변경 중…</> : recoveryMode ? "새 비밀번호 저장" : "비밀번호 변경"}
                 </button>
                 {!recoveryMode ? (
