@@ -4,6 +4,7 @@ import test from "node:test";
 
 const accountSource = readFileSync(new URL("../app/account/page.tsx", import.meta.url), "utf8");
 const loginSource = readFileSync(new URL("../app/login/page.tsx", import.meta.url), "utf8");
+const recoverySource = readFileSync(new URL("../lib/auth/password-recovery.ts", import.meta.url), "utf8");
 const proxySource = readFileSync(new URL("../proxy.ts", import.meta.url), "utf8");
 const shellSource = readFileSync(new URL("../components/app-shell.tsx", import.meta.url), "utf8");
 const shellCss = readFileSync(new URL("../components/app-shell.module.css", import.meta.url), "utf8");
@@ -26,7 +27,23 @@ test("password recovery callbacks are allowed through the auth proxy before a se
   assert.ok(proxySource.includes('pathname === "/login" || isRecoveryEntry'));
 });
 
-test("PKCE recovery auth codes are exchanged before checking the account session", () => {
+test("portable recovery emails use the implicit flow instead of browser-bound PKCE", () => {
+  assert.ok(recoverySource.includes('flowType: "implicit"'));
+  assert.ok(recoverySource.includes('persistSession: false'));
+  assert.match(recoverySource, /resetPasswordForEmail/);
+  assert.match(loginSource, /requestPasswordResetEmail/);
+  assert.match(accountSource, /requestPasswordResetEmail/);
+});
+
+test("implicit recovery tokens are converted into the app session before checking the user", () => {
+  assert.ok(accountSource.includes('window.location.hash'));
+  assert.ok(accountSource.includes('hashParams.get("access_token")'));
+  assert.ok(accountSource.includes('hashParams.get("refresh_token")'));
+  assert.match(accountSource, /setSession/);
+  assert.match(accountSource, /history\.replaceState/);
+});
+
+test("legacy PKCE recovery auth codes are still exchanged before checking the account session", () => {
   assert.ok(accountSource.includes('const authCode = searchParams.get("code");'));
   assert.ok(accountSource.includes('const flowId = searchParams.get("sb_flow_id");'));
   assert.match(accountSource, /exchangeCodeForSession/);
@@ -41,10 +58,10 @@ test("recovery failures stay on the recovery screen instead of bouncing back to 
 });
 
 test("account and login pages both offer password recovery without exposing credentials", () => {
-  assert.match(accountSource, /resetPasswordForEmail/);
+  assert.match(accountSource, /requestPasswordResetEmail/);
   assert.match(accountSource, /\/account\?recovery=1/);
   assert.match(accountSource, /현재 비밀번호를 잊었나요/);
-  assert.match(loginSource, /resetPasswordForEmail/);
+  assert.match(loginSource, /requestPasswordResetEmail/);
   assert.match(loginSource, /비밀번호 재설정 메일 받기/);
   assert.match(loginSource, /\/account\?recovery=1/);
 });
