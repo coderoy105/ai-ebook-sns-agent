@@ -1,4 +1,6 @@
 import { createServiceSupabase } from "@/lib/supabase/server";
+import { planBookLength } from "@/lib/book-types/engine";
+import { fitComposedPagesToTarget } from "./page-fit";
 import { builtInTemplates, chooseLayout } from "./templates";
 import { createCoverConcepts, normalizeCoverConcept } from "./cover-system";
 
@@ -44,7 +46,7 @@ function activeBlueprintCoreMessage(value: unknown) {
 export async function composeBookPages(bookId: string) {
   const supabase = createServiceSupabase();
   const { data: book, error } = await supabase.from("books")
-    .select("id,title,subtitle,idea,book_type,book_settings(template_id),book_blueprints(blueprint,version,is_active),book_covers(id,concept,is_selected,created_at),parts(id,title,position,chapters(id,title,position,sections(id,title,position,content_markdown)))")
+    .select("id,title,subtitle,idea,book_type,target_pages,book_settings(template_id),book_blueprints(blueprint,version,is_active),book_covers(id,concept,is_selected,created_at),parts(id,title,position,chapters(id,title,position,sections(id,title,position,content_markdown)))")
     .eq("id", bookId).single();
   if (error || !book) throw error ?? new Error("Book not found.");
 
@@ -73,6 +75,8 @@ export async function composeBookPages(bookId: string) {
     coreMessage,
     templateMood: dna.mood
   });
+  const lengthPlan = planBookLength(Number(book.target_pages), String(book.book_type));
+  const contentWordsPerPage = Math.max(80, lengthPlan.wordsPerPage);
   let pageNumber = 1;
 
   rows.push({
@@ -96,7 +100,7 @@ export async function composeBookPages(bookId: string) {
         content: { partTitle: part.title, chapterTitle: chapter.title }
       });
       for (const section of [...chapter.sections].sort((a,b) => a.position-b.position)) {
-        const chunks = splitIntoPageChunks(section.content_markdown ?? "", String(book.book_type).includes("소설") ? 310 : 250);
+        const chunks = splitIntoPageChunks(section.content_markdown ?? "", contentWordsPerPage);
         for (const chunk of chunks) {
           rows.push({
             book_id: bookId, page_number: pageNumber++, layout_type: chooseLayout(chunk), template_id: dna.id,
@@ -107,9 +111,11 @@ export async function composeBookPages(bookId: string) {
     }
   }
 
+  const fittedRows = fitComposedPagesToTarget(rows, lengthPlan.targetPages);
+
   await supabase.from("pages").delete().eq("book_id", bookId);
-  if (rows.length) {
-    const { error: insertError } = await supabase.from("pages").insert(rows);
+  if (fittedRows.length) {
+    const { error: insertError } = await supabase.from("pages").insert(fittedRows);
     if (insertError) throw insertError;
   }
 
@@ -123,5 +129,5 @@ export async function composeBookPages(bookId: string) {
     if (coverError) throw coverError;
   }
 
-  return { pageCount: rows.length, templateId: dna.id, coverStyle: selectedCover.style };
+  return { pageCount: fittedRows.length, targetPages: lengthPlan.targetPages, templateId: dna.id, coverStyle: selectedCover.style };
 }
