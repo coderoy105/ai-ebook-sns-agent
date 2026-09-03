@@ -4,6 +4,7 @@ import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ProductMark } from "@/components/product-mark";
 import { createClient } from "@/lib/supabase/client";
+import { requestPasswordResetEmail } from "@/lib/auth/password-recovery";
 import { isAccountAlreadyRegistered, userFacingAuthError } from "@/lib/auth/user-facing-errors";
 
 type RegistrationPayload = { error?: unknown };
@@ -38,10 +39,10 @@ export default function LoginPage() {
     setResetLoading(true);
     setMessage("");
     try {
-      const supabase = createClient();
-      const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
-        redirectTo: `${window.location.origin}/account?recovery=1`
-      });
+      const { error } = await requestPasswordResetEmail(
+        normalizedEmail,
+        `${window.location.origin}/account?recovery=1`
+      );
       if (error) throw error;
       setMessage("비밀번호 재설정 메일을 보냈습니다. 메일의 링크를 열어 새 비밀번호를 설정해 주세요.");
     } catch (error) {
