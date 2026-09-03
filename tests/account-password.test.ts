@@ -4,6 +4,7 @@ import test from "node:test";
 
 const accountSource = readFileSync(new URL("../app/account/page.tsx", import.meta.url), "utf8");
 const loginSource = readFileSync(new URL("../app/login/page.tsx", import.meta.url), "utf8");
+const proxySource = readFileSync(new URL("../proxy.ts", import.meta.url), "utf8");
 const shellSource = readFileSync(new URL("../components/app-shell.tsx", import.meta.url), "utf8");
 const shellCss = readFileSync(new URL("../components/app-shell.module.css", import.meta.url), "utf8");
 
@@ -18,6 +19,11 @@ test("verified recovery sessions can set a new password without asking for the o
   assert.match(accountSource, /const recoveryMode = searchParams\.get\("recovery"\) === "1"/);
   assert.match(accountSource, /if \(!recoveryMode\)/);
   assert.match(accountSource, /router\.replace\("\/account"\)/);
+});
+
+test("password recovery callbacks are allowed through the auth proxy before a session exists", () => {
+  assert.ok(proxySource.includes('const isRecoveryEntry = pathname === "/account" && request.nextUrl.searchParams.get("recovery") === "1";'));
+  assert.ok(proxySource.includes('pathname === "/login" || isRecoveryEntry'));
 });
 
 test("account and login pages both offer password recovery without exposing credentials", () => {
