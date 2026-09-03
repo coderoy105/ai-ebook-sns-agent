@@ -29,6 +29,13 @@ test("account and login pages both offer password recovery without exposing cred
   assert.match(loginSource, /\/account\?recovery=1/);
 });
 
+test("legacy existing passwords can still be entered while new passwords remain eight characters or longer", () => {
+  assert.match(loginSource, /const minimumPasswordLength = mode === "register" \? 8 : 6/);
+  assert.match(loginSource, /minLength=\{minimumPasswordLength\}/);
+  assert.match(accountSource, /id="current-password"[^>]*minLength=\{6\}/);
+  assert.match(accountSource, /id="new-password"[^>]*minLength=\{8\}/);
+});
+
 test("account security is reachable from desktop and mobile app navigation", () => {
   assert.match(shellSource, /href: "\/account"/);
   assert.match(shellSource, /pathname\.startsWith\("\/account"\)/);
