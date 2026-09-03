@@ -86,7 +86,7 @@ export function PagedManuscriptEditor({ value, onChange, placeholder, disabled }
   }
 
   return (
-    <div className={styles.viewport} ref={viewportRef} aria-label="페이지 단위 원고 편집기">
+    <div className={styles.viewport} ref={viewportRef} aria-label="선택한 Section의 페이지 단위 원고 편집기">
       <div className={styles.stack} style={{ width: PAGE_WIDTH * scale }}>
         {pages.map((page, index) => (
           <div
@@ -99,7 +99,7 @@ export function PagedManuscriptEditor({ value, onChange, placeholder, disabled }
               style={{ width: PAGE_WIDTH, height: PAGE_HEIGHT, transform: `scale(${scale})` }}
             >
               <div className={styles.pageHeader} aria-hidden="true">
-                <span>AI BOOK STUDIO</span>
+                <span>AI BOOK STUDIO · SECTION</span>
                 <span>{String(index + 1).padStart(2, "0")}</span>
               </div>
               <textarea
@@ -113,8 +113,8 @@ export function PagedManuscriptEditor({ value, onChange, placeholder, disabled }
                 spellCheck
               />
               <footer className={styles.pageFooter} aria-hidden="true">
-                <span>{index + 1}</span>
-                <span>{pages.length} pages</span>
+                <span>이 Section · {index + 1}/{pages.length}</span>
+                <span>책 전체 목표와 별도</span>
               </footer>
             </article>
           </div>
