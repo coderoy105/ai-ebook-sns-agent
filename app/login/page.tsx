@@ -125,7 +125,10 @@ export default function LoginPage() {
             const loginError = await signInExistingAccount(normalizedEmail);
             if (!loginError) return;
 
-            changeMode("login");
+            setMode("login");
+            setConfirmPassword("");
+            setShowPassword(false);
+            setShowConfirmPassword(false);
             setMessageKind("error");
             setMessage("이미 가입된 이메일입니다. 로그인 탭으로 전환했습니다. 기존 비밀번호를 확인하거나 비밀번호 재설정을 이용해 주세요.");
             return;
