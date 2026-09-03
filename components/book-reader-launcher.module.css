@@ -1,0 +1,52 @@
+.launcher {
+  position: fixed;
+  z-index: 72;
+  right: 318px;
+  bottom: 18px;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 10px 6px 7px;
+  border: 1px solid #d7dad2;
+  border-radius: 12px;
+  background: #fff;
+  color: #1b1d18;
+  box-shadow: 0 12px 36px rgba(24,26,21,.12);
+  text-decoration: none;
+  transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease;
+}
+
+.launcher:hover {
+  transform: translateY(-1px);
+  border-color: #afb5aa;
+  box-shadow: 0 15px 40px rgba(24,26,21,.15);
+}
+
+.launcher.ready { border-color: #bfc8ec; }
+
+.bookIcon {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: #1d2230;
+}
+.bookIcon i { position: absolute; display: block; border: 1px solid rgba(255,255,255,.82); border-radius: 1px; }
+.bookIcon i:nth-child(1) { width: 13px; height: 18px; transform: translateX(-3px); background: rgba(255,255,255,.08); }
+.bookIcon i:nth-child(2) { width: 13px; height: 18px; transform: translateX(3px); background: rgba(255,255,255,.13); }
+.bookIcon i:nth-child(3) { width: 1px; height: 17px; border: 0; background: rgba(255,255,255,.48); }
+
+.copy { display: grid; gap: 1px; }
+.copy small { color: #8a8e86; font-size: 7px; font-weight: 700; letter-spacing: .11em; }
+.copy strong { font-size: 11px; font-weight: 760; white-space: nowrap; }
+.arrow { margin-left: 2px; color: #7c8178; font-size: 11px; }
+
+.ready .bookIcon { background: #2563eb; }
+.ready .copy small { color: #6576c8; }
+
+@media (max-width: 760px) {
+  .launcher { right: 12px; bottom: calc(190px + env(safe-area-inset-bottom)); }
+}
