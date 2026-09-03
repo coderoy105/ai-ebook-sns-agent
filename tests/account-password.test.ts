@@ -26,6 +26,20 @@ test("password recovery callbacks are allowed through the auth proxy before a se
   assert.ok(proxySource.includes('pathname === "/login" || isRecoveryEntry'));
 });
 
+test("PKCE recovery auth codes are exchanged before checking the account session", () => {
+  assert.ok(accountSource.includes('const authCode = searchParams.get("code");'));
+  assert.ok(accountSource.includes('const flowId = searchParams.get("sb_flow_id");'));
+  assert.match(accountSource, /exchangeCodeForSession/);
+  assert.ok(accountSource.includes('router.replace("/account?recovery=1")'));
+  assert.ok(accountSource.includes('if (recoveryMode && authCode)'));
+});
+
+test("recovery failures stay on the recovery screen instead of bouncing back to login", () => {
+  assert.ok(accountSource.includes('if (recoveryMode) {'));
+  assert.ok(accountSource.includes('재설정 세션을 확인하지 못했습니다'));
+  assert.ok(accountSource.includes('disabled={recoveryMode && !email}'));
+});
+
 test("account and login pages both offer password recovery without exposing credentials", () => {
   assert.match(accountSource, /resetPasswordForEmail/);
   assert.match(accountSource, /\/account\?recovery=1/);
