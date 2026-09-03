@@ -16,6 +16,7 @@ export default function LoginPage() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
+  const minimumPasswordLength = mode === "register" ? 8 : 6;
 
   async function signInExistingAccount(normalizedEmail: string) {
     const supabase = createClient();
@@ -128,12 +129,12 @@ export default function LoginPage() {
             </div>
             <div className="field">
               <label htmlFor="login-password">비밀번호</label>
-              <input id="login-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="8자 이상" autoComplete={mode === "register" ? "new-password" : "current-password"} minLength={8} maxLength={128} required />
+              <input id="login-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={mode === "register" ? "8자 이상" : "비밀번호 입력"} autoComplete={mode === "register" ? "new-password" : "current-password"} minLength={minimumPasswordLength} maxLength={128} required />
               <small>{mode === "register" ? "8자 이상 입력해 주세요." : "등록한 비밀번호를 입력해 주세요."}</small>
             </div>
           </div>
 
-          <button type="submit" className="button button-primary login-submit" disabled={!email || password.length < 8 || loading || resetLoading}>
+          <button type="submit" className="button button-primary login-submit" disabled={!email || password.length < minimumPasswordLength || loading || resetLoading}>
             {loading ? <><span className="button-spinner" aria-hidden="true" /> 처리 중…</> : mode === "register" ? "계정 만들고 시작" : "로그인"}
           </button>
           {mode === "login" ? (
