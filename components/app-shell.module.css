@@ -1,0 +1,9 @@
+.navGrid {
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .navGrid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
