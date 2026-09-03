@@ -5,6 +5,7 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["@react-pdf/renderer", "@openai/codex"],
   async rewrites() {
     return [
+      { source: "/books/:id/read", destination: "/read?bookId=:id" },
       { source: "/books/:id", destination: "/book?bookId=:id" },
       { source: "/api/auth/openrouter/connection", destination: "/api/core/auth/ai-connection" },
       { source: "/api/auth/openrouter/exchange", destination: "/api/core/auth/openrouter-exchange" },
