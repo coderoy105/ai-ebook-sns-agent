@@ -31,8 +31,8 @@ test("web reader renders the full book as a vertically scrollable page stream", 
   assert.match(readerCss, /\.sheet/);
 });
 
-test("editor exposes a final-book reader launcher and pretty book URL", () => {
-  assert.match(shellSource, /BookReaderLauncher/);
-  assert.match(shellSource, /completed=\{initialBook\.status===\"COMPLETED\"\}/);
+test("editor exposes a final-book reader launcher only after completion and uses a pretty book URL", () => {
+  assert.match(shellSource, /initialBook\.status===\"COMPLETED\" \? <BookReaderLauncher/);
+  assert.match(shellSource, /completed \/>/);
   assert.ok(nextConfig.includes('{ source: "/books/:id/read", destination: "/read?bookId=:id" }'));
 });
