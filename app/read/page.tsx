@@ -159,12 +159,18 @@ export default function BookReadPage() {
   const [scrollProgress, setScrollProgress] = useState(0);
 
   useEffect(() => {
-    const id = resolveBookIdFromLocation();
-    setBookId(id);
-    if (!id) { setError("원고 ID가 없습니다."); setLoading(false); return; }
-
     let active = true;
     void (async () => {
+      await Promise.resolve();
+      const id = resolveBookIdFromLocation();
+      if (!active) return;
+      setBookId(id);
+      if (!id) {
+        setError("원고 ID가 없습니다.");
+        setLoading(false);
+        return;
+      }
+
       try {
         const response = await fetch(`/api/books/${id}/reader`, { cache: "no-store" });
         if (response.status === 401) {
