@@ -15,6 +15,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
 
   async function signInExistingAccount(normalizedEmail: string) {
     const supabase = createClient();
@@ -23,6 +24,30 @@ export default function LoginPage() {
     router.replace("/dashboard");
     router.refresh();
     return null;
+  }
+
+  async function sendPasswordReset() {
+    if (resetLoading) return;
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!/^\S+@\S+\.\S+$/.test(normalizedEmail)) {
+      setMessage("비밀번호를 재설정할 이메일을 먼저 입력해 주세요.");
+      return;
+    }
+
+    setResetLoading(true);
+    setMessage("");
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
+        redirectTo: `${window.location.origin}/account?recovery=1`
+      });
+      if (error) throw error;
+      setMessage("비밀번호 재설정 메일을 보냈습니다. 메일의 링크를 열어 새 비밀번호를 설정해 주세요.");
+    } catch (error) {
+      setMessage(userFacingAuthError(error, "재설정 메일을 보내지 못했습니다. 잠시 후 다시 시도해 주세요."));
+    } finally {
+      setResetLoading(false);
+    }
   }
 
   async function submit(event?: FormEvent<HTMLFormElement>) {
@@ -48,7 +73,7 @@ export default function LoginPage() {
             if (!loginError) return;
 
             setMode("login");
-            setMessage("이미 가입된 이메일입니다. 로그인 탭으로 전환했습니다. 기존 비밀번호를 확인해 다시 로그인해 주세요.");
+            setMessage("이미 가입된 이메일입니다. 로그인 탭으로 전환했습니다. 기존 비밀번호를 확인하거나 비밀번호 재설정을 이용해 주세요.");
             return;
           }
           throw new Error(userFacingAuthError(registrationError, "회원가입에 실패했습니다. 잠시 후 다시 시도해 주세요."));
@@ -84,7 +109,7 @@ export default function LoginPage() {
       </section>
 
       <section className="login-panel">
-        <form className="login-form-shell" onSubmit={submit} aria-busy={loading}>
+        <form className="login-form-shell" onSubmit={submit} aria-busy={loading || resetLoading}>
           <div className="login-form-intro">
             <span>{mode === "login" ? "Welcome back" : "Create workspace"}</span>
             <h2>{mode === "login" ? "작업실로 돌아가기" : "새 작업실 만들기"}</h2>
@@ -108,9 +133,14 @@ export default function LoginPage() {
             </div>
           </div>
 
-          <button type="submit" className="button button-primary login-submit" disabled={!email || password.length < 8 || loading}>
+          <button type="submit" className="button button-primary login-submit" disabled={!email || password.length < 8 || loading || resetLoading}>
             {loading ? <><span className="button-spinner" aria-hidden="true" /> 처리 중…</> : mode === "register" ? "계정 만들고 시작" : "로그인"}
           </button>
+          {mode === "login" ? (
+            <button type="button" className="text-button" onClick={sendPasswordReset} disabled={resetLoading || loading || !email}>
+              {resetLoading ? "재설정 메일 보내는 중…" : "비밀번호 재설정 메일 받기"}
+            </button>
+          ) : null}
           <p className="login-security-note">로그인 후 원고 데이터는 계정 권한에 따라 분리되어 표시됩니다.</p>
           {message && <p className="notice" role="alert" aria-live="assertive">{message}</p>}
         </form>
