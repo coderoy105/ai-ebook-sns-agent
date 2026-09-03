@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { createClient } from "@/lib/supabase/client";
 import { userFacingAuthError } from "@/lib/auth/user-facing-errors";
@@ -11,6 +11,8 @@ type Notice = { kind: "success" | "error" | "info"; text: string } | null;
 
 export default function AccountPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const recoveryMode = searchParams.get("recovery") === "1";
   const supabase = useMemo(() => createClient(), []);
   const [email, setEmail] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
@@ -19,7 +21,7 @@ export default function AccountPage() {
   const [loading, setLoading] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
-  const [notice, setNotice] = useState<Notice>(null);
+  const [notice, setNotice] = useState<Notice>(recoveryMode ? { kind: "info", text: "비밀번호 재설정 링크로 들어왔습니다. 새 비밀번호를 입력해 저장해 주세요." } : null);
 
   useEffect(() => {
     let active = true;
@@ -48,7 +50,7 @@ export default function AccountPage() {
       setNotice({ kind: "error", text: "새 비밀번호 확인이 일치하지 않습니다." });
       return;
     }
-    if (currentPassword === newPassword) {
+    if (!recoveryMode && currentPassword === newPassword) {
       setNotice({ kind: "error", text: "현재 비밀번호와 다른 새 비밀번호를 입력해 주세요." });
       return;
     }
@@ -59,13 +61,15 @@ export default function AccountPage() {
 
     setLoading(true);
     try {
-      const { error: verifyError } = await supabase.auth.signInWithPassword({
-        email,
-        password: currentPassword
-      });
-      if (verifyError) {
-        setNotice({ kind: "error", text: "현재 비밀번호가 올바르지 않습니다. 비밀번호를 잊었다면 아래의 이메일 재설정을 이용해 주세요." });
-        return;
+      if (!recoveryMode) {
+        const { error: verifyError } = await supabase.auth.signInWithPassword({
+          email,
+          password: currentPassword
+        });
+        if (verifyError) {
+          setNotice({ kind: "error", text: "현재 비밀번호가 올바르지 않습니다. 비밀번호를 잊었다면 아래의 이메일 재설정을 이용해 주세요." });
+          return;
+        }
       }
 
       const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
@@ -75,6 +79,7 @@ export default function AccountPage() {
       setNewPassword("");
       setConfirmPassword("");
       setNotice({ kind: "success", text: "비밀번호를 변경했습니다. 다음 로그인부터 새 비밀번호를 사용하세요." });
+      if (recoveryMode) router.replace("/account");
     } catch (error) {
       setNotice({ kind: "error", text: userFacingAuthError(error, "비밀번호를 변경하지 못했습니다. 잠시 후 다시 시도해 주세요.") });
     } finally {
@@ -134,15 +139,17 @@ export default function AccountPage() {
           <section className={`${styles.card} ${styles.passwordCard}`} aria-labelledby="password-title">
             <div className={styles.cardHeading}>
               <span>SECURITY</span>
-              <h2 id="password-title">비밀번호 변경</h2>
-              <p>현재 비밀번호를 한 번 확인한 뒤 새 비밀번호로 변경합니다.</p>
+              <h2 id="password-title">{recoveryMode ? "새 비밀번호 설정" : "비밀번호 변경"}</h2>
+              <p>{recoveryMode ? "이메일로 확인된 복구 세션에서 새 비밀번호를 설정합니다." : "현재 비밀번호를 한 번 확인한 뒤 새 비밀번호로 변경합니다."}</p>
             </div>
 
             <form className={styles.form} onSubmit={changePassword} aria-busy={loading}>
-              <div className="field">
-                <label htmlFor="current-password">현재 비밀번호</label>
-                <input id="current-password" type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" minLength={8} maxLength={128} required />
-              </div>
+              {!recoveryMode ? (
+                <div className="field">
+                  <label htmlFor="current-password">현재 비밀번호</label>
+                  <input id="current-password" type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" minLength={8} maxLength={128} required />
+                </div>
+              ) : null}
               <div className="field">
                 <label htmlFor="new-password">새 비밀번호</label>
                 <input id="new-password" type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={128} required />
@@ -154,12 +161,14 @@ export default function AccountPage() {
               </div>
 
               <div className={styles.actions}>
-                <button type="submit" className="button button-primary" disabled={loading || !currentPassword || newPassword.length < 8 || confirmPassword.length < 8}>
-                  {loading ? <><span className="button-spinner" aria-hidden="true" /> 변경 중…</> : "비밀번호 변경"}
+                <button type="submit" className="button button-primary" disabled={loading || (!recoveryMode && !currentPassword) || newPassword.length < 8 || confirmPassword.length < 8}>
+                  {loading ? <><span className="button-spinner" aria-hidden="true" /> 변경 중…</> : recoveryMode ? "새 비밀번호 저장" : "비밀번호 변경"}
                 </button>
-                <button type="button" className="text-button" onClick={sendResetEmail} disabled={resetLoading || !email}>
-                  {resetLoading ? "재설정 메일 보내는 중…" : "현재 비밀번호를 잊었나요?"}
-                </button>
+                {!recoveryMode ? (
+                  <button type="button" className="text-button" onClick={sendResetEmail} disabled={resetLoading || !email}>
+                    {resetLoading ? "재설정 메일 보내는 중…" : "현재 비밀번호를 잊었나요?"}
+                  </button>
+                ) : null}
               </div>
             </form>
 
