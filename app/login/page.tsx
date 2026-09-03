@@ -4,6 +4,9 @@ import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ProductMark } from "@/components/product-mark";
 import { createClient } from "@/lib/supabase/client";
+import { isAccountAlreadyRegistered, userFacingAuthError } from "@/lib/auth/user-facing-errors";
+
+type RegistrationPayload = { error?: unknown };
 
 export default function LoginPage() {
   const router = useRouter();
@@ -13,29 +16,52 @@ export default function LoginPage() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
+  async function signInExistingAccount(normalizedEmail: string) {
+    const supabase = createClient();
+    const { error } = await supabase.auth.signInWithPassword({ email: normalizedEmail, password });
+    if (error) return error;
+    router.replace("/dashboard");
+    router.refresh();
+    return null;
+  }
+
   async function submit(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
     if (loading) return;
     setLoading(true);
     setMessage("");
+    const normalizedEmail = email.trim().toLowerCase();
+
     try {
       if (mode === "register") {
         const registration = await fetch("/api/auth/register", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ email, password })
+          body: JSON.stringify({ email: normalizedEmail, password })
         });
-        const payload = await registration.json();
-        if (!registration.ok) throw new Error(payload.error ?? "회원가입에 실패했습니다.");
+        const payload = await registration.json().catch(() => ({})) as RegistrationPayload;
+
+        if (!registration.ok) {
+          const registrationError = payload.error ?? "회원가입에 실패했습니다.";
+          if (isAccountAlreadyRegistered(registrationError)) {
+            const loginError = await signInExistingAccount(normalizedEmail);
+            if (!loginError) return;
+
+            setMode("login");
+            setMessage("이미 가입된 이메일입니다. 로그인 탭으로 전환했습니다. 기존 비밀번호를 확인해 다시 로그인해 주세요.");
+            return;
+          }
+          throw new Error(userFacingAuthError(registrationError, "회원가입에 실패했습니다. 잠시 후 다시 시도해 주세요."));
+        }
       }
 
-      const supabase = createClient();
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) throw error;
-      router.replace("/dashboard");
-      router.refresh();
+      const loginError = await signInExistingAccount(normalizedEmail);
+      if (loginError) throw loginError;
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "로그인에 실패했습니다.");
+      setMessage(userFacingAuthError(
+        error,
+        mode === "register" ? "회원가입에 실패했습니다. 잠시 후 다시 시도해 주세요." : "로그인에 실패했습니다. 잠시 후 다시 시도해 주세요."
+      ));
     } finally {
       setLoading(false);
     }
