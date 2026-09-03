@@ -30,10 +30,10 @@ test("account and login pages both offer password recovery without exposing cred
 });
 
 test("legacy existing passwords can still be entered while new passwords remain eight characters or longer", () => {
-  assert.match(loginSource, /const minimumPasswordLength = mode === "register" \? 8 : 6/);
-  assert.match(loginSource, /minLength=\{minimumPasswordLength\}/);
-  assert.match(accountSource, /id="current-password"[^>]*minLength=\{6\}/);
-  assert.match(accountSource, /id="new-password"[^>]*minLength=\{8\}/);
+  assert.ok(loginSource.includes('const minimumPasswordLength = mode === "register" ? 8 : 6;'));
+  assert.ok(loginSource.includes('minLength={minimumPasswordLength}'));
+  assert.ok(accountSource.includes('autoComplete="current-password" minLength={6} maxLength={128}'));
+  assert.ok(accountSource.includes('autoComplete="new-password" minLength={8} maxLength={128}'));
 });
 
 test("account security is reachable from desktop and mobile app navigation", () => {
