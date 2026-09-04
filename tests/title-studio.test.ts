@@ -58,7 +58,7 @@ test("new book wizard supports optional direct title and AI recommendations befo
   assert.match(draftStudioSource, /AI 제목 5개 추천/);
   assert.match(draftStudioSource, /\/api\/title-suggestions/);
   assert.match(wizardSource, /DraftTitleStudio/);
-  assert.match(wizardSource, /title: ""/);
+  assert.match(wizardSource, /title\s*:\s*""/);
   assert.match(wizardSource, /\/api\/books\/\$\{payload\.bookId\}\/title/);
   assert.match(wizardSource, /AI가 Book Blueprint에서 최종 제목 결정/);
 });
