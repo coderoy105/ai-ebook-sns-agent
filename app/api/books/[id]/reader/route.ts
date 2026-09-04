@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { composeBookPages } from "@/lib/design/compose";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
+import { resolveRuntimeDesign, runtimeDesignSnapshot, type TemplateDbRow } from "@/lib/design/runtime-template";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status, headers: { "cache-control": "no-store" } });
@@ -18,9 +19,6 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
     if (bookError || !book) return jsonError("BOOK_NOT_FOUND", 404);
 
-    // A completed book should always reflect the latest saved manuscript edits.
-    // Composition is deterministic and does not call an AI provider, so refreshing
-    // the canonical pages here keeps the web reader aligned with export semantics.
     if (book.status === "COMPLETED") {
       await composeBookPages(id);
     }
@@ -36,6 +34,16 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       return jsonError(book.status === "COMPLETED" ? "BOOK_PAGES_NOT_READY" : "BOOK_NOT_COMPLETED", 409);
     }
 
+    const templateId = pages[0]?.template_id ?? "modern-editorial";
+    const embeddedDesign = pages[0]?.content && typeof pages[0].content === "object" && !Array.isArray(pages[0].content)
+      ? (pages[0].content as Record<string, unknown>).design
+      : null;
+    let design = embeddedDesign;
+    if (!design) {
+      const { data: templateRow } = await service.from("templates").select("id,name,genre,design_dna,is_system").eq("id", templateId).maybeSingle();
+      design = runtimeDesignSnapshot(resolveRuntimeDesign(templateId, templateRow as TemplateDbRow | null));
+    }
+
     return NextResponse.json({
       book: {
         id: book.id,
@@ -47,6 +55,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
         updatedAt: book.updated_at
       },
       pages,
+      design,
       pageCount: pages.length,
       final: book.status === "COMPLETED"
     }, { headers: { "cache-control": "no-store" } });

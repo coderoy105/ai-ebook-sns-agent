@@ -1,16 +1,17 @@
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { normalizeCoverConcept, type CoverConcept } from "@/lib/design/cover-system";
+import { resolveRuntimeDesign, type RuntimeDesign, type TemplateDbRow } from "@/lib/design/runtime-template";
 
 export type ExportSection={id:string;title:string;position:number;content_markdown:string|null};
 export type ExportChapter={id:string;title:string;position:number;sections:ExportSection[]};
 export type ExportPart={id:string;title:string;position:number;chapters:ExportChapter[]};
-export type ExportBook={id:string;title:string;subtitle:string|null;book_type:string;cover:CoverConcept;parts:ExportPart[]};
+export type ExportBook={id:string;title:string;subtitle:string|null;book_type:string;cover:CoverConcept;design:RuntimeDesign;parts:ExportPart[]};
 
 type CoverRow={concept:unknown;is_selected?:boolean;created_at?:string};
 
 export async function collectBook(bookId:string):Promise<ExportBook>{
   const supabase=createServiceSupabase();
-  const {data,error}=await supabase.from("books").select("id,title,subtitle,idea,book_type,book_covers(concept,is_selected,created_at),parts(id,title,position,chapters(id,title,position,sections(id,title,position,content_markdown)))").eq("id",bookId).single();
+  const {data,error}=await supabase.from("books").select("id,title,subtitle,idea,book_type,book_settings(template_id),book_covers(concept,is_selected,created_at),parts(id,title,position,chapters(id,title,position,sections(id,title,position,content_markdown)))").eq("id",bookId).single();
   if(error||!data)throw error??new Error("Book not found");
   const rawParts=(data.parts??[]) as unknown as ExportPart[];
   const parts=[...rawParts].sort((a,b)=>a.position-b.position).map(part=>({
@@ -22,7 +23,11 @@ export async function collectBook(bookId:string):Promise<ExportBook>{
   }));
   const covers=((data.book_covers??[]) as unknown as CoverRow[]).sort((a,b)=>Number(Boolean(b.is_selected))-Number(Boolean(a.is_selected)));
   const cover=normalizeCoverConcept(covers[0]?.concept,{title:String(data.title),subtitle:data.subtitle?String(data.subtitle):null,bookType:data.book_type?String(data.book_type):null,idea:data.idea?String(data.idea):null});
-  return {id:data.id,title:data.title,subtitle:data.subtitle,book_type:data.book_type,cover,parts};
+  const settings=Array.isArray(data.book_settings)?data.book_settings[0]:data.book_settings;
+  const templateId=settings?.template_id??"modern-editorial";
+  const {data:templateRow}=await supabase.from("templates").select("id,name,genre,design_dna,is_system").eq("id",templateId).maybeSingle();
+  const design=resolveRuntimeDesign(templateId,templateRow as TemplateDbRow|null);
+  return {id:data.id,title:data.title,subtitle:data.subtitle,book_type:data.book_type,cover,design,parts};
 }
 
 export function stripMarkdown(markdown:string){

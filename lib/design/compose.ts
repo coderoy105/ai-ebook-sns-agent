@@ -1,7 +1,8 @@
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { planBookLength } from "@/lib/book-types/engine";
 import { fitComposedPagesToTarget } from "./page-fit";
-import { builtInTemplates, chooseLayout } from "./templates";
+import { chooseLayout } from "./templates";
+import { resolveRuntimeDesign, runtimeDesignSnapshot, type TemplateDbRow } from "./runtime-template";
 import { createCoverConcepts, normalizeCoverConcept } from "./cover-system";
 
 type SectionRow = { id:string; title:string; position:number; content_markdown:string|null };
@@ -52,7 +53,10 @@ export async function composeBookPages(bookId: string) {
 
   const setting = Array.isArray(book.book_settings) ? book.book_settings[0] : book.book_settings;
   const templateId = setting?.template_id ?? "modern-editorial";
-  const dna = builtInTemplates.find((t) => t.id === templateId) ?? builtInTemplates[0];
+  const { data: templateRow } = await supabase.from("templates").select("id,name,genre,design_dna,is_system").eq("id", templateId).maybeSingle();
+  const design = resolveRuntimeDesign(templateId, templateRow as TemplateDbRow | null);
+  const dna = design.dna;
+  const designSnapshot = runtimeDesignSnapshot(design);
   const rows: PageInsert[] = [];
   const parts = (book.parts ?? []) as unknown as PartRow[];
   const existingCovers = ((book.book_covers ?? []) as unknown as CoverRow[]).sort((a, b) => Number(b.is_selected) - Number(a.is_selected));
@@ -80,12 +84,13 @@ export async function composeBookPages(bookId: string) {
   let pageNumber = 1;
 
   rows.push({
-    book_id: bookId, page_number: pageNumber++, layout_type: "Cover", template_id: dna.id,
-    content: { title: book.title, subtitle: book.subtitle, designDNA: dna, coverConcept: selectedCover }
+    book_id: bookId, page_number: pageNumber++, layout_type: "Cover", template_id: design.id,
+    content: { title: book.title, subtitle: book.subtitle, designDNA: dna, design: designSnapshot, coverConcept: selectedCover }
   });
   rows.push({
-    book_id: bookId, page_number: pageNumber++, layout_type: "TableOfContents", template_id: dna.id,
+    book_id: bookId, page_number: pageNumber++, layout_type: "TableOfContents", template_id: design.id,
     content: {
+      design: designSnapshot,
       parts: [...parts].sort((a,b) => a.position-b.position).map((part) => ({
         title: part.title,
         chapters: [...part.chapters].sort((a,b) => a.position-b.position).map((chapter) => chapter.title)
@@ -96,15 +101,15 @@ export async function composeBookPages(bookId: string) {
   for (const part of [...parts].sort((a,b) => a.position-b.position)) {
     for (const chapter of [...part.chapters].sort((a,b) => a.position-b.position)) {
       rows.push({
-        book_id: bookId, page_number: pageNumber++, layout_type: "ChapterOpening", template_id: dna.id,
-        content: { partTitle: part.title, chapterTitle: chapter.title }
+        book_id: bookId, page_number: pageNumber++, layout_type: "ChapterOpening", template_id: design.id,
+        content: { partTitle: part.title, chapterTitle: chapter.title, design: designSnapshot }
       });
       for (const section of [...chapter.sections].sort((a,b) => a.position-b.position)) {
         const chunks = splitIntoPageChunks(section.content_markdown ?? "", contentWordsPerPage);
         for (const chunk of chunks) {
           rows.push({
-            book_id: bookId, page_number: pageNumber++, layout_type: chooseLayout(chunk), template_id: dna.id,
-            content: { sectionId: section.id, sectionTitle: section.title, markdown: chunk }
+            book_id: bookId, page_number: pageNumber++, layout_type: chooseLayout(chunk), template_id: design.id,
+            content: { sectionId: section.id, sectionTitle: section.title, markdown: chunk, design: designSnapshot }
           });
         }
       }
@@ -129,5 +134,5 @@ export async function composeBookPages(bookId: string) {
     if (coverError) throw coverError;
   }
 
-  return { pageCount: fittedRows.length, targetPages: lengthPlan.targetPages, templateId: dna.id, coverStyle: selectedCover.style };
+  return { pageCount: fittedRows.length, targetPages: lengthPlan.targetPages, templateId: design.id, coverStyle: selectedCover.style, design: designSnapshot };
 }

@@ -1,0 +1,32 @@
+"use client";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { TemplateBookPreview } from "@/components/template-book-preview";
+import { builtInTemplateCards, customTemplateToCard } from "@/lib/design/template-browser";
+import styles from "./template-studio.module.css";
+
+type Draft={name:string;description:string;baseTemplateId:"modern-editorial"|"minimal-tech"|"quiet-fiction";accentColor:string;paperTone:string;headingFamily:"serif"|"sans";bodyFamily:"serif"|"sans";spacingScale:"tight"|"balanced"|"airy";contentWidth:"narrow"|"medium"|"wide";chapterStyle:"classic"|"bold"|"minimal";quoteStyle:"line"|"box"|"indent"};
+const initial:Draft={name:"나만의 템플릿",description:"직접 조정한 책 디자인 템플릿",baseTemplateId:"modern-editorial",accentColor:"#2447d8",paperTone:"#fffef9",headingFamily:"serif",bodyFamily:"serif",spacingScale:"airy",contentWidth:"medium",chapterStyle:"bold",quoteStyle:"line"};
+
+export function TemplateStudio(){
+ const router=useRouter(); const [draft,setDraft]=useState<Draft>(initial); const [editingId,setEditingId]=useState<string|null>(null); const [saving,setSaving]=useState(false); const [error,setError]=useState("");
+ const card=useMemo(()=>customTemplateToCard({id:editingId??"preview",...draft}),[draft,editingId]);
+ useEffect(()=>{const id=new URL(window.location.href).searchParams.get("edit");if(!id)return;setEditingId(id);void fetch("/api/design-templates",{cache:"no-store"}).then(r=>r.json().then(p=>({r,p}))).then(({r,p})=>{if(!r.ok)return;const found=Array.isArray(p.templates)?p.templates.find((x:{id?:string})=>x.id===id):null;if(found)setDraft({name:found.name,description:found.description,baseTemplateId:found.baseTemplateId,accentColor:found.accentColor,paperTone:found.paperTone,headingFamily:found.headingFamily,bodyFamily:found.bodyFamily,spacingScale:found.spacingScale,contentWidth:found.contentWidth,chapterStyle:found.chapterStyle,quoteStyle:found.quoteStyle});}).catch(()=>undefined);},[]);
+ function update<K extends keyof Draft>(key:K,value:Draft[K]){setDraft(prev=>({...prev,[key]:value}));}
+ async function save(){setSaving(true);setError("");try{const res=await fetch(editingId?`/api/design-templates/${encodeURIComponent(editingId)}`:"/api/design-templates",{method:editingId?"PATCH":"POST",headers:{"content-type":"application/json"},body:JSON.stringify(draft)});const payload=await res.json();if(!res.ok)throw new Error(payload.error??"템플릿 저장에 실패했습니다.");const id=editingId??payload.template?.id;if(!id)throw new Error("저장된 템플릿 ID를 받지 못했습니다.");router.push(`/books/new?template=${encodeURIComponent(id)}`);router.refresh();}catch(e){setError(e instanceof Error?e.message:"템플릿 저장에 실패했습니다.");}finally{setSaving(false);}}
+ return <section className={styles.shell}>
+  <div className={styles.panel}><header className={styles.head}><span className={styles.eyebrow}>Design Studio</span><h1>{editingId?"템플릿 수정하기":"나만의 템플릿 만들기"}</h1><p>색상, 서체, 여백과 장 시작 스타일을 직접 조절하고 실제 샘플 책으로 확인하세요.</p></header><div className={styles.form}>
+   <div className={styles.field}><label>템플릿 이름</label><input value={draft.name} onChange={e=>update("name",e.target.value)}/></div>
+   <div className={styles.field}><label>설명</label><textarea value={draft.description} onChange={e=>update("description",e.target.value)}/></div>
+   <div className={styles.field}><label>기본 Design DNA</label><select value={draft.baseTemplateId} onChange={e=>update("baseTemplateId",e.target.value as Draft["baseTemplateId"])}>{builtInTemplateCards.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></div>
+   <div className={styles.two}><div className={styles.field}><label>포인트 색상</label><div className={styles.color}><input aria-label="포인트 색상" type="color" value={draft.accentColor} onChange={e=>update("accentColor",e.target.value)}/></div></div><div className={styles.field}><label>종이 톤</label><div className={styles.color}><input aria-label="종이 톤" type="color" value={draft.paperTone} onChange={e=>update("paperTone",e.target.value)}/></div></div></div>
+   <div className={styles.two}><div className={styles.field}><label>제목 서체</label><select value={draft.headingFamily} onChange={e=>update("headingFamily",e.target.value as Draft["headingFamily"])}><option value="serif">Serif</option><option value="sans">Sans</option></select></div><div className={styles.field}><label>본문 서체</label><select value={draft.bodyFamily} onChange={e=>update("bodyFamily",e.target.value as Draft["bodyFamily"])}><option value="serif">Serif</option><option value="sans">Sans</option></select></div></div>
+   <div className={styles.two}><div className={styles.field}><label>여백 밀도</label><select value={draft.spacingScale} onChange={e=>update("spacingScale",e.target.value as Draft["spacingScale"])}><option value="tight">Compact</option><option value="balanced">Balanced</option><option value="airy">Airy</option></select></div><div className={styles.field}><label>본문 폭</label><select value={draft.contentWidth} onChange={e=>update("contentWidth",e.target.value as Draft["contentWidth"])}><option value="narrow">Narrow</option><option value="medium">Medium</option><option value="wide">Wide</option></select></div></div>
+   <div className={styles.two}><div className={styles.field}><label>장 시작</label><select value={draft.chapterStyle} onChange={e=>update("chapterStyle",e.target.value as Draft["chapterStyle"])}><option value="classic">Classic</option><option value="bold">Bold</option><option value="minimal">Minimal</option></select></div><div className={styles.field}><label>인용문</label><select value={draft.quoteStyle} onChange={e=>update("quoteStyle",e.target.value as Draft["quoteStyle"])}><option value="line">Line</option><option value="box">Box</option><option value="indent">Indent</option></select></div></div>
+   {error?<p className={styles.error}>{error}</p>:<p className={styles.notice}>저장한 템플릿은 계정에 저장되어 다른 기기에서도 새 책 디자인으로 사용할 수 있습니다.</p>}
+   <div className={styles.actions}><button type="button" className="button button-primary" disabled={saving||!draft.name.trim()} onClick={save}>{saving?"저장 중…":editingId?"수정 내용 저장":"템플릿 저장"}</button><Link className="button secondary" href="/books/new">취소</Link></div>
+  </div></div>
+  <div className={styles.preview}><header className={styles.head}><span className={styles.eyebrow}>Live Preview</span><h2>샘플 책으로 확인</h2><p>표지, 목차, Chapter, 본문, 인용문과 데이터 페이지까지 스크롤하며 확인할 수 있습니다.</p></header><div className={styles.previewBody}><TemplateBookPreview template={card}/></div></div>
+ </section>;
+}

@@ -7,6 +7,11 @@ function paragraphs(markdown:string){return stripMarkdown(markdown).split(/\n{2,
 
 export async function renderBookEpub(book:ExportBook){
   const zip=new JSZip();
+  const headingFamily=book.design.headingFamily==="sans"?"system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif":"Georgia,Noto Serif KR,serif";
+  const bodyFamily=book.design.bodyFamily==="sans"?"system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif":"Georgia,Noto Serif KR,serif";
+  const width=book.design.contentWidth==="narrow"?"36em":book.design.contentWidth==="wide"?"52em":"44em";
+  const lineHeight=book.design.spacingScale==="tight"?"1.55":book.design.spacingScale==="airy"?"1.9":"1.72";
+  const css=`body{font-family:${bodyFamily};line-height:${lineHeight};margin:6%;max-width:${width};background:${book.design.paperTone};color:#23221f}h1,h2{font-family:${headingFamily};line-height:1.2}h1{color:${book.design.accentColor}}h2{margin-top:2em}blockquote{border-left:3px solid ${book.design.accentColor};padding-left:1em}code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}`;
   zip.file("mimetype","application/epub+zip",{compression:"STORE"});
   zip.file("META-INF/container.xml",`<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`);
   const chapters=book.parts.flatMap(part=>part.chapters.map(ch=>({part,ch})));
@@ -14,6 +19,6 @@ export async function renderBookEpub(book:ExportBook){
   const spine=chapters.map((_,i)=>`<itemref idref="c${i}"/>`).join("");
   zip.file("OEBPS/content.opf",`<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="bookid">${book.id}</dc:identifier><dc:title>${esc(book.title)}</dc:title><dc:language>ko</dc:language><meta property="dcterms:modified">${new Date().toISOString().replace(/\.\d{3}Z$/,"Z")}</meta></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>${manifest}</manifest><spine>${spine}</spine></package>`);
   zip.file("OEBPS/nav.xhtml",`<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Contents</title></head><body><nav epub:type="toc" xmlns:epub="http://www.idpf.org/2007/ops"><h1>Contents</h1><ol>${chapters.map(({ch},i)=>`<li><a href="c${i}.xhtml">${esc(ch.title)}</a></li>`).join("")}</ol></nav></body></html>`);
-  chapters.forEach(({part,ch},i)=>zip.file(`OEBPS/c${i}.xhtml`,`<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>${esc(ch.title)}</title><style>body{font-family:serif;line-height:1.75;margin:6%;max-width:42em}h1{line-height:1.2}h2{margin-top:2em}</style></head><body><small>${esc(part.title)}</small><h1>${esc(ch.title)}</h1>${ch.sections.map(sec=>`<section><h2>${esc(sec.title)}</h2>${paragraphs(sec.content_markdown??"")}</section>`).join("")}</body></html>`));
+  chapters.forEach(({part,ch},i)=>zip.file(`OEBPS/c${i}.xhtml`,`<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>${esc(ch.title)}</title><style>${css}</style></head><body><small>${esc(part.title)}</small><h1>${esc(ch.title)}</h1>${ch.sections.map(sec=>`<section><h2>${esc(sec.title)}</h2>${paragraphs(sec.content_markdown??"")}</section>`).join("")}</body></html>`));
   return zip.generateAsync({type:"nodebuffer",compression:"DEFLATE",compressionOptions:{level:7}});
 }
