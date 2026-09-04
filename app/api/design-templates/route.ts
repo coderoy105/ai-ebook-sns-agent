@@ -23,11 +23,14 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
-function serialize(row: { id: string; name: string; design_dna: unknown; created_at?: string | null }) {
+function serialize(row: Record<string, unknown>) {
   const dna = asRecord(row.design_dna);
+  const id = typeof row.id === "string" ? row.id : "";
+  const name = typeof row.name === "string" ? row.name : "Untitled Template";
+  const createdAt = typeof row.created_at === "string" ? row.created_at : null;
   return {
-    id: row.id,
-    name: row.name,
+    id,
+    name,
     description: typeof dna.description === "string" ? dna.description : "",
     baseTemplateId: typeof dna.baseTemplateId === "string" ? dna.baseTemplateId : "modern-editorial",
     accentColor: typeof dna.accentColor === "string" ? dna.accentColor : "#2447d8",
@@ -38,7 +41,7 @@ function serialize(row: { id: string; name: string; design_dna: unknown; created
     contentWidth: ["narrow", "medium", "wide"].includes(String(dna.contentWidth)) ? String(dna.contentWidth) : "medium",
     chapterStyle: ["classic", "bold", "minimal"].includes(String(dna.chapterStyle)) ? String(dna.chapterStyle) : "bold",
     quoteStyle: ["line", "box", "indent"].includes(String(dna.quoteStyle)) ? String(dna.quoteStyle) : "line",
-    createdAt: row.created_at ?? null,
+    createdAt,
     isSystem: false
   };
 }
@@ -53,7 +56,7 @@ export async function GET() {
       .order("created_at", { ascending: false })
       .limit(100);
     if (error) throw error;
-    const templates = (data ?? []).filter((row) => asRecord(row.design_dna).ownerUserId === user.id).map(serialize);
+    const templates = (data ?? []).filter((row) => asRecord(row.design_dna).ownerUserId === user.id).map((row) => serialize(row));
     return NextResponse.json({ templates }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "TEMPLATE_LIST_FAILED";
