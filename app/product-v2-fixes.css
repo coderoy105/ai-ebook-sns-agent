@@ -41,8 +41,84 @@
   color: #f4f6f1;
 }
 
+/* Template sample preview should appear immediately instead of rendering far below the cards. */
+.template-preview-browser {
+  position: fixed;
+  inset: 0;
+  z-index: 180;
+  padding: 28px;
+  overflow: auto;
+  background: rgba(17, 19, 16, .58);
+  backdrop-filter: blur(10px);
+}
+
+.template-preview-browser > * {
+  width: min(980px, 100%);
+  margin: 0 auto;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, .28);
+}
+
+/* The autosave helper is useful but should not consume the sticky navigation area. */
+.wizard-actions > div:first-child {
+  display: none;
+}
+
 @media (max-width: 720px) {
   .production-sequence div:nth-child(n + 3) {
     border-top-color: #383c34;
+  }
+
+  .wizard-workspace {
+    padding-bottom: 8px;
+  }
+
+  .wizard-actions {
+    bottom: calc(64px + env(safe-area-inset-bottom));
+    flex-wrap: nowrap;
+    gap: 10px;
+    margin-top: 18px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    min-height: 68px;
+  }
+
+  .wizard-actions .button {
+    min-height: 46px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  .template-preview {
+    height: 150px;
+  }
+
+  .template-choice > div:last-child {
+    padding: 13px 14px 14px;
+  }
+
+  .template-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .template-actions .button {
+    width: 100%;
+    min-height: 42px;
+  }
+
+  .template-preview-browser {
+    display: flex;
+    align-items: flex-end;
+    padding: 0;
+    background: rgba(17, 19, 16, .5);
+  }
+
+  .template-preview-browser > * {
+    width: 100%;
+    max-height: calc(100dvh - 34px);
+    overflow: auto;
+    border-radius: 22px 22px 0 0;
   }
 }
