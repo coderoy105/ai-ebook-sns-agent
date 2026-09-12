@@ -1,0 +1,8 @@
+interface:
+  display_name: "Codex Login"
+  short_description: "Implement secure ChatGPT-backed Codex connection in a web app"
+  brand_color: "#111827"
+  default_prompt: "Load the installed $codex-login skill first. Inspect the target app's existing auth and deployment stack, then implement the full Codex ChatGPT device-code connection architecture: browser UX, authenticated server bridge, persistent per-user Codex runtime, secure credential persistence, status/disconnect/model checks, and production verification. Do not expose Codex credentials to the browser or treat this as the website's own login system."
+
+policy:
+  allow_implicit_invocation: true
