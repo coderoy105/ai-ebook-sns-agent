@@ -330,8 +330,8 @@ async function generate(userId, input) {
     const snapshot = await inspect(session.client);
     if (!snapshot.connected) throw new Error("CODEX_CONNECTION_REQUIRED");
     const activeModel = typeof snapshot.activeModel === "string" ? snapshot.activeModel : null;
-    if (!activeModel) throw new Error("CODEX_LUNA_UNAVAILABLE");
     if (input.model !== MODEL) throw new Error("CODEX_MODEL_NOT_ALLOWED");
+    if (activeModel !== MODEL) throw new Error("CODEX_LUNA_UNAVAILABLE");
 
     const threadResult = await session.client.request("thread/start", {
       model: activeModel,
