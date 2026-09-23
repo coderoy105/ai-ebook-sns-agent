@@ -14,7 +14,7 @@ const TRUST_LOCALHOST = process.env.CODEX_WORKER_TRUST_LOCALHOST === "1";
 const LISTEN_HOST = process.env.CODEX_WORKER_HOST?.trim() || "0.0.0.0";
 const CLOCK_SKEW_MS = Number(process.env.CODEX_WORKER_CLOCK_SKEW_MS ?? 120000);
 const IDLE_MS = Number(process.env.CODEX_WORKER_IDLE_MS ?? 900000);
-const MODEL = "gpt-5.6-luna";
+const MODEL = "gpt-6-luna";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 if (!TRUST_LOCALHOST && SHARED_SECRET.length < 32) throw new Error("CODEX_WORKER_SHARED_SECRET must be at least 32 characters.");
