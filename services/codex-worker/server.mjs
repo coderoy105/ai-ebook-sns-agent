@@ -253,6 +253,30 @@ function selectAvailableLunaModel(models) {
   return models.find((value) => /(^|[-_.])luna($|[-_.])/i.test(value)) ?? null;
 }
 
+function statusCachePath(home) {
+  return path.join(home, "codex-status-cache.json");
+}
+
+async function readStatusCache(session) {
+  try {
+    const cached = JSON.parse(await readFile(statusCachePath(session.home), "utf8"));
+    const checkedAt = Number(cached?.checkedAt);
+    if (!Number.isFinite(checkedAt) || Date.now() - checkedAt < 0
+        || Date.now() - checkedAt >= STATUS_CACHE_TTL_MS
+        || !cached?.snapshot || typeof cached.snapshot !== "object") return null;
+    return { checkedAt, snapshot: cached.snapshot };
+  } catch {
+    return null;
+  }
+}
+
+async function writeStatusCache(session, snapshot, checkedAt) {
+  const destination = statusCachePath(session.home);
+  const temporary = `${destination}.${randomUUID()}.tmp`;
+  await writeFile(temporary, JSON.stringify({ checkedAt, snapshot }), { mode: 0o600 });
+  await rename(temporary, destination);
+}
+
 async function inspect(session) {
   const now = Date.now();
   if (session.statusSnapshot && now - session.statusCheckedAt < STATUS_CACHE_TTL_MS) {
@@ -261,6 +285,13 @@ async function inspect(session) {
   if (session.statusPromise) return session.statusPromise;
 
   session.statusPromise = (async () => {
+    const persisted = await readStatusCache(session);
+    if (persisted) {
+      session.statusSnapshot = persisted.snapshot;
+      session.statusCheckedAt = persisted.checkedAt;
+      return persisted.snapshot;
+    }
+
     const client = session.client;
     const accountResponse = await client.request("account/read", { refreshToken: true }, 10000);
     const account = accountResponse?.account ?? null;
@@ -291,6 +322,7 @@ async function inspect(session) {
     };
     session.statusSnapshot = snapshot;
     session.statusCheckedAt = Date.now();
+    await writeStatusCache(session, snapshot, session.statusCheckedAt).catch(() => undefined);
     return snapshot;
   })();
 
@@ -315,6 +347,7 @@ async function startLogin(userId) {
       session.pendingLoginId = null;
       session.statusSnapshot = null;
       session.statusCheckedAt = 0;
+      void rm(statusCachePath(session.home), { force: true }).catch(() => undefined);
       unsubscribe();
     });
     return {
