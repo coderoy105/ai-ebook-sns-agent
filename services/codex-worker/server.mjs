@@ -354,7 +354,13 @@ function classifyCodexTurnMessage(message) {
   if (/unauthori[sz]ed|invalid.{0,24}(token|credential)|expired.{0,24}token/i.test(value)) return "AUTH";
   if (/model.{0,40}(not found|unavailable|not available|permission|access)|no access.{0,24}model/i.test(value)) return "MODEL_ACCESS";
   if (/bad request|invalid.{0,24}request|unsupported.{0,24}(parameter|schema|format)|json schema/i.test(value)) return "BAD_REQUEST";
-  if (/overload|temporarily unavailable|\b5\d\d\b|internal server error/i.test(value)) return "UPSTREAM";
+  const httpStatus = Number(value.match(/(?:HTTP(?:\s+status)?\s*[:=]?\s*)?([45]\d\d)\b/i)?.[1] ?? 0);
+  if (httpStatus === 401) return "AUTH";
+  if (httpStatus === 403) return "MODEL_ACCESS";
+  if (httpStatus === 429) return "RATE_LIMIT";
+  if (httpStatus === 400) return "BAD_REQUEST";
+  if (httpStatus >= 500) return "UPSTREAM";
+  if (/overload|temporarily unavailable|internal server error/i.test(value)) return "UPSTREAM";
   if (/ECONN|connection|network|disconnected|timed? out/i.test(value)) return "NETWORK";
   return null;
 }
@@ -422,7 +428,9 @@ async function generateOnce(userId, input, started) {
         const turn = completed?.params?.turn ?? {};
         const turnError = turn.error;
         const { code: errorCode, httpStatusCode } = codexTurnErrorInfo(turnError);
-        const messageHint = classifyCodexTurnMessage(turnError?.message);
+        const messageHint = classifyCodexTurnMessage(
+          [turnError?.message, turnError?.additionalDetails].filter((value) => typeof value === "string").join(" ")
+        );
         const normalizedError = safeErrorToken(errorCode);
         if (/^(USAGE_LIMIT_EXCEEDED|RATE_LIMIT_EXCEEDED|SESSION_BUDGET_EXCEEDED)$/.test(normalizedError)
             || messageHint === "RATE_LIMIT" || httpStatusCode === 429) {
