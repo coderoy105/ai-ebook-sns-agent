@@ -376,9 +376,18 @@ async function generate(userId, input) {
       });
       const completed = await Promise.race([terminalPromise, timeout]);
       if (!completed?.ok) {
-        const errorText = JSON.stringify(completed?.params?.turn?.error ?? "");
+        const turn = completed?.params?.turn ?? {};
+        const turnError = turn.error;
+        const errorText = JSON.stringify(turnError ?? "");
         if (/rate.?limit|usage.?limit|quota/i.test(errorText)) throw new Error("CODEX_USAGE_LIMIT");
-        throw new Error("CODEX_GENERATION_FAILED");
+        const safeToken = (value) => typeof value === "string"
+          ? value.toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) || "UNKNOWN"
+          : "UNKNOWN";
+        const errorRecord = turnError && typeof turnError === "object" ? turnError : {};
+        const errorCode = ["code", "type", "kind", "codexErrorInfo"]
+          .map((key) => errorRecord[key])
+          .find((value) => typeof value === "string");
+        throw new Error(`CODEX_GENERATION_FAILED_${safeToken(turn.status)}_${safeToken(errorCode)}`);
       }
       if (!text.trim()) {
         const items = completed.params?.turn?.items ?? [];
