@@ -323,9 +323,52 @@ function usageFromTokenNotification(params) {
   };
 }
 
-async function generate(userId, input) {
-  return withUserLock(userId, async () => {
-    const started = Date.now();
+function safeErrorToken(value) {
+  return typeof value === "string"
+    ? value.toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) || "UNKNOWN"
+    : "UNKNOWN";
+}
+
+function codexTurnErrorInfo(turnError) {
+  const raw = turnError?.codexErrorInfo;
+  if (typeof raw === "string") return { code: raw, httpStatusCode: null };
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    const variant = Object.keys(raw).find((key) => /^[A-Za-z][A-Za-z0-9]*$/.test(key));
+    if (variant) {
+      const detail = raw[variant];
+      const status = detail && typeof detail === "object" ? Number(detail.httpStatusCode) : NaN;
+      return {
+        code: variant,
+        httpStatusCode: Number.isInteger(status) && status >= 100 && status <= 599 ? status : null
+      };
+    }
+  }
+  const fallback = ["code", "type", "kind"].map((key) => turnError?.[key])
+    .find((value) => typeof value === "string");
+  return { code: fallback ?? "unknown", httpStatusCode: null };
+}
+
+function classifyCodexTurnMessage(message) {
+  const value = typeof message === "string" ? message.slice(0, 4000) : "";
+  if (/rate.?limit|usage.?limit|quota|too many requests/i.test(value)) return "RATE_LIMIT";
+  if (/unauthori[sz]ed|invalid.{0,24}(token|credential)|expired.{0,24}token/i.test(value)) return "AUTH";
+  if (/model.{0,40}(not found|unavailable|not available|permission|access)|no access.{0,24}model/i.test(value)) return "MODEL_ACCESS";
+  if (/bad request|invalid.{0,24}request|unsupported.{0,24}(parameter|schema|format)|json schema/i.test(value)) return "BAD_REQUEST";
+  if (/overload|temporarily unavailable|\b5\d\d\b|internal server error/i.test(value)) return "UPSTREAM";
+  if (/ECONN|connection|network|disconnected|timed? out/i.test(value)) return "NETWORK";
+  return null;
+}
+
+function isRetryableCodexGenerationError(error) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (!message.startsWith("CODEX_GENERATION_FAILED_")) return false;
+  const transient = ["SERVER_OVERLOADED", "HTTP_CONNECTION_FAILED", "RESPONSE_STREAM_CONNECTION_FAILED", "RESPONSE_STREAM_DISCONNECTED"];
+  if (!transient.some((code) => message.includes(`_${code}`))) return false;
+  const status = Number(message.match(/_HTTP_(\d{3})(?:_|$)/)?.[1] ?? 0);
+  return status === 0 || status >= 500;
+}
+
+async function generateOnce(userId, input, started) {
     const session = await sessionFor(userId);
     const snapshot = await inspect(session.client);
     if (!snapshot.connected) throw new Error("CODEX_CONNECTION_REQUIRED");
@@ -378,16 +421,25 @@ async function generate(userId, input) {
       if (!completed?.ok) {
         const turn = completed?.params?.turn ?? {};
         const turnError = turn.error;
-        const errorText = JSON.stringify(turnError ?? "");
-        if (/rate.?limit|usage.?limit|quota/i.test(errorText)) throw new Error("CODEX_USAGE_LIMIT");
-        const safeToken = (value) => typeof value === "string"
-          ? value.toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) || "UNKNOWN"
-          : "UNKNOWN";
-        const errorRecord = turnError && typeof turnError === "object" ? turnError : {};
-        const errorCode = ["code", "type", "kind", "codexErrorInfo"]
-          .map((key) => errorRecord[key])
-          .find((value) => typeof value === "string");
-        throw new Error(`CODEX_GENERATION_FAILED_${safeToken(turn.status)}_${safeToken(errorCode)}`);
+        const { code: errorCode, httpStatusCode } = codexTurnErrorInfo(turnError);
+        const messageHint = classifyCodexTurnMessage(turnError?.message);
+        const normalizedError = safeErrorToken(errorCode);
+        if (/^(USAGE_LIMIT_EXCEEDED|RATE_LIMIT_EXCEEDED|SESSION_BUDGET_EXCEEDED)$/.test(normalizedError)
+            || messageHint === "RATE_LIMIT" || httpStatusCode === 429) {
+          throw new Error("CODEX_USAGE_LIMIT");
+        }
+        if (normalizedError === "UNAUTHORIZED" || httpStatusCode === 401 || messageHint === "AUTH") {
+          throw new Error("CODEX_AUTH_REJECTED");
+        }
+        if (normalizedError === "CONTEXT_WINDOW_EXCEEDED") {
+          throw new Error("CODEX_CONTEXT_WINDOW_EXCEEDED");
+        }
+        if (httpStatusCode === 403 || messageHint === "MODEL_ACCESS") {
+          throw new Error("CODEX_MODEL_ACCESS_DENIED");
+        }
+        const statusSuffix = httpStatusCode ? `_HTTP_${httpStatusCode}` : "";
+        const hintSuffix = messageHint ? `_DETAIL_${safeErrorToken(messageHint)}` : "";
+        throw new Error(`CODEX_GENERATION_FAILED_${safeErrorToken(turn.status)}_${normalizedError}${statusSuffix}${hintSuffix}`);
       }
       if (!text.trim()) {
         const items = completed.params?.turn?.items ?? [];
@@ -411,6 +463,25 @@ async function generate(userId, input) {
       if (timeoutHandle) clearTimeout(timeoutHandle);
       unsubscribe();
     }
+}
+
+async function generate(userId, input) {
+  return withUserLock(userId, async () => {
+    const started = Date.now();
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        return await generateOnce(userId, input, started);
+      } catch (error) {
+        if (attempt === 0 && isRetryableCodexGenerationError(error)) {
+          console.warn("[codex-worker] retrying one transient Codex turn failure", {
+            code: error.message.slice(0, 120)
+          });
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw new Error("CODEX_GENERATION_FAILED");
   });
 }
 
@@ -544,7 +615,10 @@ const server = http.createServer(async (req, res) => {
     return json(res, 404, { error: "WORKER_ROUTE_NOT_FOUND" });
   } catch (error) {
     const code = publicError(error);
-    const status = code === "WORKER_RATE_LIMITED" || code === "CODEX_USAGE_LIMIT" ? 429 : code === "CODEX_CONNECTION_REQUIRED" ? 428 : 400;
+    const status = code === "WORKER_RATE_LIMITED" || code === "CODEX_USAGE_LIMIT" ? 429
+      : code === "CODEX_AUTH_REJECTED" ? 401
+        : code.startsWith("CODEX_GENERATION_FAILED_") ? 502
+          : code === "CODEX_CONNECTION_REQUIRED" ? 428 : 400;
     return json(res, status, { error: code });
   }
 });
