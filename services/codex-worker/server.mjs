@@ -246,6 +246,12 @@ function assertRate(userId, route) {
   if (current.count > limit) throw new Error("WORKER_RATE_LIMITED");
 }
 
+function selectAvailableLunaModel(models) {
+  if (models.includes(MODEL)) return MODEL;
+  if (models.includes("gpt-5.6-luna")) return "gpt-5.6-luna";
+  return models.find((value) => /(^|[-_.])luna($|[-_.])/i.test(value)) ?? null;
+}
+
 async function inspect(client) {
   const accountResponse = await client.request("account/read", { refreshToken: true }, 30000);
   const account = accountResponse?.account ?? null;
@@ -254,6 +260,7 @@ async function inspect(client) {
     ? await client.request("model/list", { limit: 100, includeHidden: true }, 30000)
     : { data: [] };
   const models = Array.from(new Set((modelResponse?.data ?? []).flatMap((item) => [item?.id, item?.model]).filter((value) => typeof value === "string")));
+  const activeModel = selectAvailableLunaModel(models);
   let rateLimits = null;
   if (authMode === "chatgpt") {
     try { rateLimits = await client.request("account/rateLimits/read", undefined, 30000); }
@@ -264,8 +271,12 @@ async function inspect(client) {
     authMode,
     email: account?.type === "chatgpt" ? account.email ?? null : null,
     planType: account?.type === "chatgpt" ? account.planType ?? null : null,
-    model: MODEL,
-    modelAvailable: models.includes(MODEL),
+    model: activeModel ?? MODEL,
+    activeModel,
+    requestedModel: MODEL,
+    modelAvailable: Boolean(activeModel),
+    requestedModelAvailable: models.includes(MODEL),
+    modelFallback: Boolean(activeModel && activeModel !== MODEL),
     models,
     rateLimits
   };
@@ -318,11 +329,12 @@ async function generate(userId, input) {
     const session = await sessionFor(userId);
     const snapshot = await inspect(session.client);
     if (!snapshot.connected) throw new Error("CODEX_CONNECTION_REQUIRED");
-    if (!snapshot.modelAvailable) throw new Error("CODEX_LUNA_UNAVAILABLE");
+    const activeModel = typeof snapshot.activeModel === "string" ? snapshot.activeModel : null;
+    if (!activeModel) throw new Error("CODEX_LUNA_UNAVAILABLE");
     if (input.model !== MODEL) throw new Error("CODEX_MODEL_NOT_ALLOWED");
 
     const threadResult = await session.client.request("thread/start", {
-      model: MODEL,
+      model: activeModel,
       cwd: path.join(session.home, "work"),
       approvalPolicy: "never",
       sandbox: "read-only",
@@ -351,7 +363,7 @@ async function generate(userId, input) {
       const turnResult = await session.client.request("turn/start", {
         threadId,
         input: [{ type: "text", text: input.prompt, textElements: [] }],
-        model: MODEL,
+        model: activeModel,
         outputSchema: input.jsonSchema,
         sandboxPolicy: { type: "readOnly", networkAccess: false },
         approvalPolicy: "never"
@@ -382,7 +394,7 @@ async function generate(userId, input) {
         usage: {
           ...tokenUsage,
           durationMs: Date.now() - started,
-          model: MODEL,
+          model: activeModel,
           requestId: turnId
         }
       };
