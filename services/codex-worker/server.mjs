@@ -430,7 +430,7 @@ function isRetryableCodexGenerationError(error) {
 
 async function generateOnce(userId, input, started) {
     const session = await sessionFor(userId);
-    const snapshot = await inspect(session.client);
+    const snapshot = await inspect(session);
     if (!snapshot.connected) throw new Error("CODEX_CONNECTION_REQUIRED");
     const activeModel = typeof snapshot.activeModel === "string" ? snapshot.activeModel : null;
     if (input.model !== MODEL) throw new Error("CODEX_MODEL_NOT_ALLOWED");
@@ -658,7 +658,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/auth/start") return json(res, 200, await startLogin(userId));
     if (req.method === "GET" && url.pathname === "/auth/status") {
       const session = await sessionFor(userId);
-      const snapshot = await inspect(session.client);
+      const snapshot = await inspect(session);
       if (snapshot.connected) session.pendingLoginId = null;
       return json(res, 200, snapshot);
     }
