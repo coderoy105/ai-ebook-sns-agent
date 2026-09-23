@@ -1,8 +1,8 @@
 import http from "node:http";
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import readline from "node:readline";
 
@@ -247,9 +247,7 @@ function assertRate(userId, route) {
 }
 
 function selectAvailableLunaModel(models) {
-  if (models.includes(MODEL)) return MODEL;
-  if (models.includes("gpt-5.6-luna")) return "gpt-5.6-luna";
-  return models.find((value) => /(^|[-_.])luna($|[-_.])/i.test(value)) ?? null;
+  return models.includes(MODEL) ? MODEL : null;
 }
 
 async function inspect(client) {
@@ -405,6 +403,71 @@ async function generate(userId, input) {
   });
 }
 
+const GENERATION_JOB_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+function generationJobPath(userId, jobId) {
+  if (!UUID_RE.test(jobId)) throw new Error("CODEX_GENERATION_JOB_INVALID");
+  return path.join(userHome(userId), "generation-jobs", `${jobId}.json`);
+}
+
+async function writeGenerationJob(userId, job) {
+  const home = await ensureHome(userId);
+  const directory = path.join(home, "generation-jobs");
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const destination = generationJobPath(userId, job.jobId);
+  const temporary = `${destination}.${randomUUID()}.tmp`;
+  await writeFile(temporary, JSON.stringify(job), { mode: 0o600 });
+  await rename(temporary, destination);
+}
+
+async function startGenerationJob(userId, input) {
+  if (!input || input.model !== MODEL) throw new Error("CODEX_MODEL_NOT_ALLOWED");
+  const jobId = randomUUID();
+  const now = Date.now();
+  const job = {
+    jobId,
+    status: "queued",
+    progress: 8,
+    message: "생성 요청을 접수했습니다.",
+    expectedCount: Number.isFinite(Number(input.expectedCount)) ? Math.max(1, Math.min(40, Math.trunc(Number(input.expectedCount)))) : null,
+    timeoutMs: Math.min(Math.max(Number(input.timeoutMs ?? 165000), 10000), 600000),
+    createdAt: now,
+    updatedAt: now
+  };
+  await writeGenerationJob(userId, job);
+  void (async () => {
+    try {
+      await writeGenerationJob(userId, { ...job, status: "running", progress: 18, message: "GPT-6 Luna가 문항과 해설을 작성하고 있습니다.", updatedAt: Date.now() });
+      const result = await generate(userId, input);
+      await writeGenerationJob(userId, { ...job, status: "complete", progress: 100, message: "시험지를 완성했습니다.", result, updatedAt: Date.now() });
+    } catch (error) {
+      await writeGenerationJob(userId, { ...job, status: "error", progress: 100, message: "생성 중 문제가 발생했습니다.", error: publicError(error), updatedAt: Date.now() }).catch(() => undefined);
+    }
+  })();
+  return { jobId, status: "queued" };
+}
+
+async function readGenerationJob(userId, jobId) {
+  const file = generationJobPath(userId, jobId);
+  let job;
+  try {
+    job = JSON.parse(await readFile(file, "utf8"));
+  } catch {
+    throw new Error("CODEX_GENERATION_JOB_NOT_FOUND");
+  }
+  const age = Date.now() - Number(job.createdAt ?? 0);
+  if (!Number.isFinite(age) || age > GENERATION_JOB_MAX_AGE_MS) {
+    await rm(file, { force: true }).catch(() => undefined);
+    throw new Error("CODEX_GENERATION_JOB_EXPIRED");
+  }
+  const staleAfter = Math.max(10 * 60 * 1000, Number(job.timeoutMs ?? 165000) + 120000);
+  if ((job.status === "queued" || job.status === "running") && Date.now() - Number(job.updatedAt ?? job.createdAt) > staleAfter) {
+    job = { ...job, status: "error", progress: 100, message: "생성 작업이 중단되었습니다. 다시 시도해 주세요.", error: "CODEX_GENERATION_INTERRUPTED", updatedAt: Date.now() };
+    await writeGenerationJob(userId, job);
+  }
+  return job;
+}
+
 function json(res, status, payload) {
   const body = JSON.stringify(payload);
   res.writeHead(status, {
@@ -445,7 +508,8 @@ const server = http.createServer(async (req, res) => {
     const body = bodyText ? JSON.parse(bodyText) : {};
     const userId = typeof body.userId === "string" ? body.userId : url.searchParams.get("userId") ?? "";
     if (!UUID_RE.test(userId)) return json(res, 400, { error: "INVALID_USER_ID" });
-    assertRate(userId, url.pathname);
+    const rateRoute = req.method === "POST" && url.pathname === "/generate/jobs" ? "/generate" : url.pathname;
+    assertRate(userId, rateRoute);
 
     if (req.method === "POST" && url.pathname === "/auth/start") return json(res, 200, await startLogin(userId));
     if (req.method === "GET" && url.pathname === "/auth/status") {
@@ -463,6 +527,8 @@ const server = http.createServer(async (req, res) => {
       const snapshot = await inspect((await sessionFor(userId)).client);
       return json(res, 200, { planType: snapshot.planType, rateLimits: snapshot.rateLimits });
     }
+    if (req.method === "POST" && url.pathname === "/generate/jobs") return json(res, 202, await startGenerationJob(userId, body));
+    if (req.method === "GET" && url.pathname === "/generate/jobs") return json(res, 200, await readGenerationJob(userId, url.searchParams.get("jobId") ?? ""));
     if (req.method === "POST" && url.pathname === "/generate") return json(res, 200, await generate(userId, body));
     return json(res, 404, { error: "WORKER_ROUTE_NOT_FOUND" });
   } catch (error) {
