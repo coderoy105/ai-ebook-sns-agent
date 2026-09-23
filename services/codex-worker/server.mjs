@@ -14,6 +14,7 @@ const TRUST_LOCALHOST = process.env.CODEX_WORKER_TRUST_LOCALHOST === "1";
 const LISTEN_HOST = process.env.CODEX_WORKER_HOST?.trim() || "0.0.0.0";
 const CLOCK_SKEW_MS = Number(process.env.CODEX_WORKER_CLOCK_SKEW_MS ?? 120000);
 const IDLE_MS = Number(process.env.CODEX_WORKER_IDLE_MS ?? 900000);
+const STATUS_CACHE_TTL_MS = 120000;
 const MODEL = "gpt-6-luna";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -185,7 +186,7 @@ async function sessionFor(userId) {
   }
   const home = await ensureHome(userId);
   const client = await AppServerClient.start(home);
-  session = { home, client, lastUsed: Date.now(), pendingLoginId: null };
+  session = { home, client, lastUsed: Date.now(), pendingLoginId: null, statusSnapshot: null, statusCheckedAt: 0, statusPromise: null };
   sessions.set(userId, session);
   return session;
 }
@@ -252,40 +253,90 @@ function selectAvailableLunaModel(models) {
   return models.find((value) => /(^|[-_.])luna($|[-_.])/i.test(value)) ?? null;
 }
 
-async function inspect(client) {
-  const accountResponse = await client.request("account/read", { refreshToken: true }, 30000);
-  const account = accountResponse?.account ?? null;
-  const authMode = account?.type === "chatgpt" ? "chatgpt" : account?.type ?? null;
-  const modelResponse = authMode === "chatgpt"
-    ? await client.request("model/list", { limit: 100, includeHidden: true }, 30000)
-    : { data: [] };
-  const models = Array.from(new Set((modelResponse?.data ?? []).flatMap((item) => [item?.id, item?.model]).filter((value) => typeof value === "string")));
-  const activeModel = selectAvailableLunaModel(models);
-  let rateLimits = null;
-  if (authMode === "chatgpt") {
-    try { rateLimits = await client.request("account/rateLimits/read", undefined, 30000); }
-    catch { rateLimits = null; }
+function statusCachePath(home) {
+  return path.join(home, "codex-status-cache.json");
+}
+
+async function readStatusCache(session) {
+  try {
+    const cached = JSON.parse(await readFile(statusCachePath(session.home), "utf8"));
+    const checkedAt = Number(cached?.checkedAt);
+    if (!Number.isFinite(checkedAt) || Date.now() - checkedAt < 0
+        || Date.now() - checkedAt >= STATUS_CACHE_TTL_MS
+        || !cached?.snapshot || typeof cached.snapshot !== "object") return null;
+    return { checkedAt, snapshot: cached.snapshot };
+  } catch {
+    return null;
   }
-  return {
-    connected: authMode === "chatgpt",
-    authMode,
-    email: account?.type === "chatgpt" ? account.email ?? null : null,
-    planType: account?.type === "chatgpt" ? account.planType ?? null : null,
-    model: activeModel ?? MODEL,
-    activeModel,
-    requestedModel: MODEL,
-    modelAvailable: Boolean(activeModel),
-    requestedModelAvailable: models.includes(MODEL),
-    modelFallback: Boolean(activeModel && activeModel !== MODEL),
-    models,
-    rateLimits
-  };
+}
+
+async function writeStatusCache(session, snapshot, checkedAt) {
+  const destination = statusCachePath(session.home);
+  const temporary = `${destination}.${randomUUID()}.tmp`;
+  await writeFile(temporary, JSON.stringify({ checkedAt, snapshot }), { mode: 0o600 });
+  await rename(temporary, destination);
+}
+
+async function inspect(session) {
+  const now = Date.now();
+  if (session.statusSnapshot && now - session.statusCheckedAt < STATUS_CACHE_TTL_MS) {
+    return session.statusSnapshot;
+  }
+  if (session.statusPromise) return session.statusPromise;
+
+  session.statusPromise = (async () => {
+    const persisted = await readStatusCache(session);
+    if (persisted) {
+      session.statusSnapshot = persisted.snapshot;
+      session.statusCheckedAt = persisted.checkedAt;
+      return persisted.snapshot;
+    }
+
+    const client = session.client;
+    const accountResponse = await client.request("account/read", { refreshToken: true }, 10000);
+    const account = accountResponse?.account ?? null;
+    const authMode = account?.type === "chatgpt" ? "chatgpt" : account?.type ?? null;
+    let modelResponse = { data: [] };
+    let rateLimits = null;
+    if (authMode === "chatgpt") {
+      [modelResponse, rateLimits] = await Promise.all([
+        client.request("model/list", { limit: 100, includeHidden: true }, 12000),
+        client.request("account/rateLimits/read", undefined, 8000).catch(() => null)
+      ]);
+    }
+    const models = Array.from(new Set((modelResponse?.data ?? []).flatMap((item) => [item?.id, item?.model]).filter((value) => typeof value === "string")));
+    const activeModel = selectAvailableLunaModel(models);
+    const snapshot = {
+      connected: authMode === "chatgpt",
+      authMode,
+      email: account?.type === "chatgpt" ? account.email ?? null : null,
+      planType: account?.type === "chatgpt" ? account.planType ?? null : null,
+      model: activeModel ?? MODEL,
+      activeModel,
+      requestedModel: MODEL,
+      modelAvailable: Boolean(activeModel),
+      requestedModelAvailable: models.includes(MODEL),
+      modelFallback: Boolean(activeModel && activeModel !== MODEL),
+      models,
+      rateLimits
+    };
+    session.statusSnapshot = snapshot;
+    session.statusCheckedAt = Date.now();
+    await writeStatusCache(session, snapshot, session.statusCheckedAt).catch(() => undefined);
+    return snapshot;
+  })();
+
+  try {
+    return await session.statusPromise;
+  } finally {
+    session.statusPromise = null;
+  }
 }
 
 async function startLogin(userId) {
   return withUserLock(userId, async () => {
     const session = await sessionFor(userId);
-    const current = await inspect(session.client).catch(() => null);
+    const current = await inspect(session).catch(() => null);
     if (current?.connected) return { type: "already_connected", ...current };
     const login = await session.client.request("account/login/start", { type: "chatgptDeviceCode" }, 60000);
     if (!login?.loginId || !login?.verificationUrl || !login?.userCode) throw new Error("CODEX_DEVICE_CODE_START_FAILED");
@@ -294,6 +345,9 @@ async function startLogin(userId) {
       if (message.method !== "account/login/completed") return;
       if (message.params?.loginId && message.params.loginId !== login.loginId) return;
       session.pendingLoginId = null;
+      session.statusSnapshot = null;
+      session.statusCheckedAt = 0;
+      void rm(statusCachePath(session.home), { force: true }).catch(() => undefined);
       unsubscribe();
     });
     return {
@@ -610,7 +664,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "POST" && url.pathname === "/auth/logout") return json(res, 200, await logout(userId));
     if (req.method === "GET" && url.pathname === "/models") {
-      const snapshot = await inspect((await sessionFor(userId)).client);
+      const snapshot = await inspect(await sessionFor(userId));
       return json(res, 200, { model: MODEL, modelAvailable: snapshot.modelAvailable, models: snapshot.models });
     }
     if (req.method === "GET" && url.pathname === "/usage") {
