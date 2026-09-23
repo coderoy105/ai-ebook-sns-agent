@@ -247,7 +247,9 @@ function assertRate(userId, route) {
 }
 
 function selectAvailableLunaModel(models) {
-  return models.includes(MODEL) ? MODEL : null;
+  if (models.includes(MODEL)) return MODEL;
+  if (models.includes("gpt-5.6-luna")) return "gpt-5.6-luna";
+  return models.find((value) => /(^|[-_.])luna($|[-_.])/i.test(value)) ?? null;
 }
 
 async function inspect(client) {
