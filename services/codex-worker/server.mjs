@@ -360,7 +360,7 @@ async function generate(userId, input) {
     try {
       const turnResult = await session.client.request("turn/start", {
         threadId,
-        input: [{ type: "text", text: input.prompt, textElements: [] }],
+        input: [{ type: "text", text: input.prompt, text_elements: [] }],
         model: activeModel,
         outputSchema: input.jsonSchema,
         sandboxPolicy: { type: "readOnly", networkAccess: false },
